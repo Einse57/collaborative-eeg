@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.coverage
+.tox/
+.hypothesis/
+
+# Node
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+
+# Application specific
+uploads/
+eeg_annotations.db
+*.db
+*.sqlite
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+coverage/
+htmlcov/
+.coverage.*
+
+# MNE data cache (optional - users can choose to track or not)
+mne_data/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/

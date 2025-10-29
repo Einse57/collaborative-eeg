@@ -1,0 +1,73 @@
+.signal-viewer {
+  position: relative;
+}
+
+.viewer-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.toolbar-group {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.25rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+}
+
+.toolbar-group label {
+  font-weight: 600;
+  color: #555;
+  white-space: nowrap;
+}
+
+.toolbar-info {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: #666;
+  flex-wrap: wrap;
+}
+
+.canvas-container {
+  position: relative;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: white;
+  max-height: 600px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.canvas-container canvas {
+  display: block;
+  width: 100%;
+}
+
+.loading-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 1rem 2rem;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  font-size: 1.2rem;
+}
+
+.viewer-instructions {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: #e3f2fd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #1976d2;
+}
