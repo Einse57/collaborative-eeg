@@ -94,8 +94,10 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
       
       console.log('Canvas dimensions:', width, 'x', height)
       
-      // Update canvas height
-      canvas.height = height
+      // Only update canvas height if it changed (to prevent unnecessary resets)
+      if (canvas.height !== height) {
+        canvas.height = height
+      }
 
       // Clear canvas
       ctx.fillStyle = 'white'
@@ -144,16 +146,24 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
       ctx.lineWidth = 1.5
       ctx.beginPath()
 
+      let pathStarted = false
       channelData.forEach((value, idx) => {
-        const x = (signalData.times[idx] - viewportStart) * pixelsPerSecond
+        // Use exact time from data, properly offset by viewport start
+        const timeValue = signalData.times[idx]
+        const x = (timeValue - viewportStart) * pixelsPerSecond
+        
+        // Skip points outside viewport to avoid rendering artifacts
+        if (x < 0 || x > width) return
+        
         // Clamp y to stay within channel bounds
         const rawY = yOffset - (value * finalScale)
         const minY = i * channelHeight + 5
         const maxY = (i + 1) * channelHeight - 5
         const y = Math.max(minY, Math.min(maxY, rawY))
 
-        if (idx === 0) {
+        if (!pathStarted) {
           ctx.moveTo(x, y)
+          pathStarted = true
         } else {
           ctx.lineTo(x, y)
         }
@@ -174,14 +184,25 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
     // Draw time axis
     ctx.fillStyle = '#666'
     ctx.font = '11px Arial'
-    for (let t = Math.ceil(viewportStart); t < viewportStart + viewportDuration; t++) {
+    const timeStart = Math.floor(viewportStart)
+    const timeEnd = Math.ceil(viewportStart + viewportDuration)
+    
+    for (let t = timeStart; t <= timeEnd; t++) {
+      // Skip if time is outside our actual viewport
+      if (t < viewportStart || t > viewportStart + viewportDuration) continue
+      
       const x = (t - viewportStart) * pixelsPerSecond
-      ctx.fillText(`${t}s`, x + 2, height - 5)
-      ctx.strokeStyle = '#ccc'
-      ctx.beginPath()
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, height)
-      ctx.stroke()
+      
+      // Only draw if x is within canvas bounds
+      if (x >= 0 && x <= width) {
+        ctx.fillText(`${t}s`, x + 2, height - 5)
+        ctx.strokeStyle = '#ccc'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(x, 0)
+        ctx.lineTo(x, height)
+        ctx.stroke()
+      }
     }
     
     // Render annotations ON TOP of signals and time axis (so labels are visible)

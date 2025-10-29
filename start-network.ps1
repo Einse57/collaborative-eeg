@@ -56,7 +56,7 @@ Write-Host "Starting Backend Server (Port 8000)..." -ForegroundColor Cyan
 Start-Process powershell -ArgumentList @(
     "-NoExit",
     "-Command",
-    "cd '$scriptPath\backend'; .\venv\Scripts\Activate.ps1; Write-Host 'Backend Server - Network Mode' -ForegroundColor Green; Write-Host 'Listening on http://0.0.0.0:8000' -ForegroundColor Yellow; Write-Host 'Network URL: http://${networkIP}:8000' -ForegroundColor Green; Write-Host ''; python -m app.main"
+    "cd '$scriptPath\backend'; .\venv\Scripts\Activate.ps1; Write-Host 'Backend Server - Network Mode' -ForegroundColor Green; Write-Host 'Listening on http://0.0.0.0:8000' -ForegroundColor Yellow; Write-Host 'Network URL: http://${networkIP}:8000' -ForegroundColor Green; Write-Host ''; uvicorn app.main:socket_app --host 0.0.0.0 --port 8000 --reload"
 )
 
 # Wait a moment for backend to start

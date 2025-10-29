@@ -25,7 +25,7 @@ Write-Host ""
 Write-Host "Starting backend server..." -ForegroundColor Yellow
 
 # Start backend in a new PowerShell window
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PWD\backend'; if (Test-Path '.\venv\Scripts\Activate.ps1') { .\venv\Scripts\Activate.ps1 } else { Write-Host 'Virtual environment not found. Run: python -m venv venv' -ForegroundColor Red }; python -m app.main"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PWD\backend'; if (Test-Path '.\venv\Scripts\Activate.ps1') { .\venv\Scripts\Activate.ps1 } else { Write-Host 'Virtual environment not found. Run: python -m venv venv' -ForegroundColor Red }; uvicorn app.main:socket_app --host 0.0.0.0 --port 8000 --reload"
 
 Start-Sleep -Seconds 3
 
