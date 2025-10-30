@@ -182,7 +182,7 @@ class MNEService:
     ) -> bool:
         """
         Persist annotations back to the original file.
-        Only works for .fif format - other formats don't support writing annotations.
+        Works for .fif and .edf formats (EDF+ with annotations).
         Returns True if successful, False if format doesn't support persistence.
         """
         if dataset_id not in self.loaded_datasets:
@@ -194,9 +194,11 @@ class MNEService:
         file_path = self.dataset_file_paths[dataset_id]
         file_ext = Path(file_path).suffix.lower()
         
-        # Only .fif format supports writing with annotations
-        if file_ext != '.fif':
+        # .fif and .edf formats support writing with annotations
+        # .edf writes as EDF+ with annotations
+        if file_ext not in ['.fif', '.edf']:
             print(f"Warning: {file_ext} format does not support annotation persistence")
+            print(f"Supported formats: .fif, .edf (saves as EDF+)")
             return False
         
         raw = self.loaded_datasets[dataset_id]
@@ -215,8 +217,13 @@ class MNEService:
         
         # Save back to file (overwrite original)
         try:
-            raw.save(file_path, overwrite=True)
-            print(f"Successfully persisted {len(annotations)} annotations to {file_path}")
+            if file_ext == '.fif':
+                raw.save(file_path, overwrite=True)
+                print(f"Successfully persisted {len(annotations)} annotations to {file_path}")
+            elif file_ext == '.edf':
+                # MNE exports EDF with annotations as EDF+
+                mne.export.export_raw(file_path, raw, fmt='edf', overwrite=True)
+                print(f"Successfully persisted {len(annotations)} annotations to {file_path} (EDF+)")
             return True
         except Exception as e:
             print(f"Error persisting annotations: {e}")

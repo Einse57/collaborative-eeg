@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import './SignalViewer.css'
 
-const API_URL = 'http://localhost:8000'
+// API URL from environment variable, fallback to localhost
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotationCreate }) {
-  console.log('SignalViewer component rendered with dataset:', dataset?.id)
+  console.log('SignalViewer rendered')
+  console.log('Dataset:', dataset)
+  console.log('Dataset metadata:', dataset?.metadata)
   
   const canvasRef = useRef(null)
   const containerRef = useRef(null)
@@ -41,24 +44,30 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
   }, [signalData, annotations, amplitudeScale, selectedDescription, maxChannelsToShow])
 
   const loadSignalData = async () => {
+    console.log('=== loadSignalData called ===')
+    console.log('Dataset ID:', dataset?.id)
+    console.log('API_URL:', API_URL)
+    
     setLoading(true)
     try {
       console.log('Loading signal data...')
-      const response = await axios.get(
-        `${API_URL}/api/datasets/${dataset.id}/data`,
-        {
-          params: {
-            start_time: viewportStart,
-            duration: viewportDuration,
-            downsample: 2
-          }
+      const url = `${API_URL}/api/datasets/${dataset.id}/data`
+      console.log('Request URL:', url)
+      
+      const response = await axios.get(url, {
+        params: {
+          start_time: viewportStart,
+          duration: viewportDuration,
+          downsample: 2
         }
-      )
+      })
+      console.log('Response received:', response.data)
       console.log('Signal data loaded:', response.data.channel_names?.length, 'channels')
       setSignalData(response.data)
     } catch (error) {
       console.error('Error loading signal data:', error)
-      alert('Error loading signal data: ' + error.message)
+      console.error('Error details:', error.response?.data)
+      alert('Error loading signal data: ' + (error.response?.data?.detail || error.message))
     } finally {
       setLoading(false)
     }
@@ -446,15 +455,15 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
       {loading && <div className="loading-overlay">⏳ Loading data...</div>}
 
       {/* Time scrollbar */}
-      {dataset && (
+      {dataset && dataset.metadata && (
         <div style={{ marginBottom: '10px' }}>
           <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block' }}>
-            Time Navigation: {viewportStart.toFixed(1)}s / {dataset.duration?.toFixed(1) || '?'}s
+            Time Navigation: {viewportStart.toFixed(1)}s / {dataset.metadata.duration?.toFixed(1) || '?'}s
           </label>
           <input
             type="range"
             min="0"
-            max={Math.max(0, (dataset.duration || 0) - viewportDuration)}
+            max={Math.max(0, (dataset.metadata.duration || 0) - viewportDuration)}
             step="0.1"
             value={viewportStart}
             onChange={(e) => setViewportStart(parseFloat(e.target.value))}

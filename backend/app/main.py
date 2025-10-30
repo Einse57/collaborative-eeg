@@ -16,14 +16,10 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# CORS middleware
+# CORS middleware - Allow connections from any origin for local network collaboration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://*:3000",  # Allow any IP on port 3000 (local network)
-    ],
+    allow_origins=["*"],  # Allow any origin for development/local network
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,11 +28,7 @@ app.add_middleware(
 # Socket.IO server for real-time collaboration
 sio = socketio.AsyncServer(
     async_mode='asgi',
-    cors_allowed_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://*:3000",  # Allow any IP on port 3000 (local network)
-    ]
+    cors_allowed_origins="*"  # Allow any origin for development/local network
 )
 
 # Wrap with Socket.IO's ASGI app

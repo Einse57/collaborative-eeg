@@ -27,8 +27,32 @@ class AnnotationUpdate(BaseModel):
 @router.get("/{dataset_id}")
 async def get_annotations(dataset_id: str):
     """Get all annotations for a dataset"""
+    # If annotations not in memory, try to load from the MNE file
     if dataset_id not in annotations_db:
-        return {'annotations': []}
+        # Import datasets_db to check if dataset exists
+        from .datasets import datasets_db
+        
+        if dataset_id in mne_service.loaded_datasets:
+            # Load annotations from the MNE Raw object
+            raw = mne_service.loaded_datasets[dataset_id]
+            file_annotations = mne_service.load_annotations(raw)
+            
+            # Initialize annotations_db for this dataset
+            annotations_db[dataset_id] = {}
+            
+            # Convert file annotations to our format
+            for ann in file_annotations:
+                annotations_db[dataset_id][ann['id']] = {
+                    'id': ann['id'],
+                    'dataset_id': dataset_id,
+                    'onset': ann['onset'],
+                    'duration': ann['duration'],
+                    'description': ann['description'],
+                    'user': 'from_file',
+                    'created_at': ann.get('orig_time', datetime.now().isoformat())
+                }
+        else:
+            return {'annotations': []}
     
     return {'annotations': list(annotations_db[dataset_id].values())}
 

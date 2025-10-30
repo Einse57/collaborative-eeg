@@ -2,7 +2,8 @@ import { useState } from 'react'
 import axios from 'axios'
 import './AnnotationPanel.css'
 
-const API_URL = 'http://localhost:8000'
+// API URL from environment variable, fallback to localhost
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function AnnotationPanel({ datasetId, annotations, customAnnotationTypes, onCustomTypesChange, onAnnotationsChange, socket }) {
   const [filter, setFilter] = useState('')

@@ -3,6 +3,47 @@
 
 Write-Host "🧠 Starting EEG/MEG Annotation Platform..." -ForegroundColor Cyan
 
+# Detect network IP address
+Write-Host ""
+Write-Host "Detecting network configuration..." -ForegroundColor Yellow
+$networkIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
+    $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*"
+} | Select-Object -First 1).IPAddress
+
+if ($networkIP) {
+    Write-Host "✓ Network IP detected: $networkIP" -ForegroundColor Green
+    
+    # Check if .env exists and is configured correctly
+    $envPath = "$PWD\frontend\.env"
+    $envContent = "VITE_API_URL=http://${networkIP}:8000"
+    
+    if (Test-Path $envPath) {
+        $currentContent = Get-Content $envPath -Raw
+        if ($currentContent -notmatch "VITE_API_URL=http://${networkIP}:8000") {
+            Write-Host "⚙️  Updating frontend/.env with network IP..." -ForegroundColor Yellow
+            Set-Content -Path $envPath -Value "# Backend API URL - Auto-configured`n$envContent`n"
+            Write-Host "✓ Updated .env file" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "⚙️  Creating frontend/.env with network IP..." -ForegroundColor Yellow
+        Set-Content -Path $envPath -Value "# Backend API URL - Auto-configured`n$envContent`n"
+        Write-Host "✓ Created .env file" -ForegroundColor Green
+    }
+    
+    Write-Host ""
+    Write-Host "📡 Access URLs:" -ForegroundColor Cyan
+    Write-Host "   Local:  http://localhost:3000" -ForegroundColor White
+    Write-Host "   Network: http://${networkIP}:3000" -ForegroundColor Green
+    Write-Host "   Backend: http://${networkIP}:8000" -ForegroundColor Green
+    Write-Host ""
+} else {
+    Write-Host "⚠️  Could not detect network IP. Using localhost only." -ForegroundColor Yellow
+    $envPath = "$PWD\frontend\.env"
+    Set-Content -Path $envPath -Value "# Backend API URL`nVITE_API_URL=http://localhost:8000`n"
+}
+
+Write-Host ""
+
 # Check if Python is installed
 try {
     $pythonVersion = python --version 2>&1

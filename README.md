@@ -65,7 +65,40 @@ This platform provides a web interface for annotating EEG/MEG recordings with re
 
 ## Installation
 
-### Prerequisites
+### Quick Start (Recommended)
+
+For a fresh installation, run the automated setup script:
+
+```powershell
+.\setup.ps1
+```
+
+This will:
+- Check for Python 3.9+ and Node.js 18+
+- Create Python virtual environment
+- Install all backend dependencies
+- Install all frontend dependencies
+- Auto-detect your network IP address
+- Create `.env` file with correct configuration
+- Create uploads directory
+
+Then configure firewall (run as Administrator):
+```powershell
+.\configure-firewall.ps1
+```
+
+Finally, start the application:
+```powershell
+.\start.ps1
+```
+
+The `start.ps1` script automatically detects your network IP and updates the `.env` file on each run, so it always uses the correct configuration even if your IP changes.
+
+### Manual Installation
+
+If you prefer manual setup:
+
+#### Prerequisites
 
 - Python 3.9+ with pip
 - Node.js 18+ with npm
@@ -102,7 +135,38 @@ npm install
 
 ## Running the Platform
 
-### Development Mode
+### Quick Start (Recommended)
+
+**First time setup:**
+```powershell
+.\setup.ps1
+```
+
+**Configure firewall (run ONCE as Administrator):**
+```powershell
+.\configure-firewall.ps1
+```
+
+**Start the application:**
+```powershell
+.\start.ps1
+```
+
+The `start.ps1` script automatically:
+- Detects your current network IP address
+- Updates `frontend/.env` with the correct backend URL
+- Starts backend server on `http://0.0.0.0:8000`
+- Starts frontend server on `http://0.0.0.0:3000`
+- Opens both in separate PowerShell windows
+
+**Access the platform:**
+- Local: `http://localhost:3000`
+- Network: `http://YOUR_IP:3000` (shown in console output)
+- Remote clients just browse to `http://YOUR_IP:3000`
+
+### Development Mode (Manual Start)
+
+If you prefer to start servers manually in separate terminals:
 
 **Terminal 1 - Start Backend:**
 ```powershell
@@ -117,41 +181,93 @@ Server runs at http://localhost:8000
 cd frontend
 npm run dev
 ```
+**Terminal 2 - Start Frontend:**
+```powershell
+cd frontend
+npm run dev
+```
 Client runs at http://localhost:3000
+
+**Note:** Manual start requires manually updating `frontend/.env` with your IP address if you want network access.
+
+### Automated Scripts
+
+The platform includes PowerShell scripts for easy setup and deployment:
+
+**setup.ps1** - First-time installation
+- Checks for Python 3.9+ and Node.js 18+
+- Creates Python virtual environment in `backend/venv`
+- Installs all Python dependencies from `requirements.txt`
+- Installs all Node.js dependencies from `package.json`
+- Auto-detects network IP and creates `frontend/.env`
+- Creates `backend/uploads` directory
+- Run this once after cloning the repository
+
+**start.ps1** - Start application (use every time)
+- Auto-detects current network IP address
+- Updates `frontend/.env` with correct backend URL
+- Handles dynamic IP changes (DHCP networks)
+- Starts backend in new PowerShell window on port 8000
+- Starts frontend in new PowerShell window on port 3000
+- Displays local and network access URLs
+- Run this every time you want to start the platform
+
+**configure-firewall.ps1** - Configure Windows Firewall (run once)
+- Must be run as Administrator
+- Adds inbound rules for ports 8000 (backend) and 3000 (frontend)
+- Enables network access from other computers
+- Only needed once per installation
+
+**start-network.ps1** - Alternative start with network features
+- Similar to `start.ps1` but with additional network diagnostics
+- Checks firewall configuration
+- Displays detailed network information
+- Use if you have network connectivity issues
 
 ### Quick Start Script
 
-**Local access only:**
+## Network Access (Multi-User Setup)
+
+### Quick Setup (3 Steps)
+
+The platform is designed to work seamlessly on your local network:
+
+**1. First time only - Run setup:**
+```powershell
+.\setup.ps1
+```
+
+**2. First time only - Configure firewall as Administrator:**
+```powershell
+.\configure-firewall.ps1
+```
+
+**3. Every time - Start the application:**
 ```powershell
 .\start.ps1
 ```
 
-**Network access (multi-user):**
-```powershell
-.\start-network.ps1
-```
+That's it! The `start.ps1` script automatically detects your IP and configures everything.
 
-Starts both backend and frontend in separate PowerShell windows.
+**For remote users:**
+- They simply browse to `http://YOUR_IP:3000`
+- No installation needed on remote computers
+- All users see the same datasets and annotations in real-time
+- Annotations sync automatically across all connected clients
 
-## Network Access (Multi-User Setup)
+### How It Works
 
-### Quick Setup (Recommended)
+When you run `.\start.ps1`:
+1. Script detects your computer's IP address (e.g., 192.168.1.100)
+2. Updates `frontend/.env` with `VITE_API_URL=http://192.168.1.100:8000`
+3. Starts backend listening on all network interfaces (0.0.0.0:8000)
+4. Starts frontend accessible from network (0.0.0.0:3000)
+5. Displays URLs for both local and network access
 
-1. **Configure firewall** (run ONCE as Administrator):
-   ```powershell
-   .\configure-firewall.ps1
-   ```
-
-2. **Start servers with network access:**
-   ```powershell
-   .\start-network.ps1
-   ```
-
-The script will:
-- Detect your network IP automatically
-- Check firewall configuration
-- Start both servers with network access enabled
-- Display URLs for local and network access
+**All clients connect to the same backend**, ensuring:
+- Same datasets visible to everyone
+- Real-time annotation synchronization via WebSockets
+- Collaborative editing with instant updates
 
 ### Manual Setup
 

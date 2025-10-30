@@ -79,7 +79,20 @@ async def get_dataset(dataset_id: str):
     if dataset_id not in datasets_db:
         raise HTTPException(status_code=404, detail="Dataset not found")
     
-    return datasets_db[dataset_id]
+    dataset = datasets_db[dataset_id]
+    
+    # Ensure the dataset is loaded in mne_service
+    # If it's not loaded (e.g., after server restart), reload it
+    if dataset_id not in mne_service.loaded_datasets:
+        try:
+            print(f"Dataset {dataset_id} not in memory, reloading from {dataset['file_path']}")
+            raw, _ = mne_service.load_file(dataset['file_path'])
+            print(f"Successfully reloaded dataset {dataset_id}")
+        except Exception as e:
+            print(f"Error reloading dataset {dataset_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Could not reload dataset: {str(e)}")
+    
+    return dataset
 
 @router.get("/{dataset_id}/data")
 async def get_dataset_data(
