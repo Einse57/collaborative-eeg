@@ -221,8 +221,12 @@ class MNEService:
                 raw.save(file_path, overwrite=True)
                 print(f"Successfully persisted {len(annotations)} annotations to {file_path}")
             elif file_ext == '.edf':
-                # MNE exports EDF with annotations as EDF+
-                mne.export.export_raw(file_path, raw, fmt='edf', overwrite=True)
+                # For EDF, we need to use export with preloaded data
+                # Make sure data is loaded
+                if not raw.preload:
+                    raw.load_data()
+                # Export back to EDF+ format
+                raw.export(file_path, fmt='edf', overwrite=True, physical_range='auto')
                 print(f"Successfully persisted {len(annotations)} annotations to {file_path} (EDF+)")
             return True
         except Exception as e:

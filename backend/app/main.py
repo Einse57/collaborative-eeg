@@ -6,8 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import socketio
 
-from app.api.routes import datasets, annotations
 from app.core.config import settings
+from app.api.routes import datasets, annotations, event_detection_legacy, detection
 
 # Create FastAPI app
 app = FastAPI(
@@ -25,18 +25,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include API routers (BEFORE Socket.IO wrapping!)
+app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
+app.include_router(annotations.router, prefix="/api/annotations", tags=["annotations"])
+app.include_router(event_detection_legacy.router, prefix="/api/datasets", tags=["event-detection-legacy"])
+app.include_router(detection.router, prefix="/api/detection", tags=["detection-plugins"])
+
 # Socket.IO server for real-time collaboration
 sio = socketio.AsyncServer(
     async_mode='asgi',
     cors_allowed_origins="*"  # Allow any origin for development/local network
 )
 
-# Wrap with Socket.IO's ASGI app
+# Wrap with Socket.IO's ASGI app (AFTER all routes are registered!)
 socket_app = socketio.ASGIApp(sio, app)
-
-# Include API routers
-app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
-app.include_router(annotations.router, prefix="/api/annotations", tags=["annotations"])
 
 @app.get("/")
 async def root():
@@ -49,6 +51,10 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "version": "0.1.0"}
+
+@app.get("/test-detection")
+async def test_detection():
+    return {"message": "Direct route in main.py works!"}
 
 # Socket.IO event handlers
 @sio.event
