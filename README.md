@@ -361,7 +361,7 @@ The signal viewer displays EEG/MEG channels on an HTML5 canvas with:
 **Import annotations:**
 ```
 1. Click "Import" button
-2. Select JSON or CSV file
+2. Select JSON or CSV file (see formats below)
 3. Annotations load with auto-type detection
 4. New types automatically added to dropdown
 ```
@@ -373,24 +373,54 @@ The signal viewer displays EEG/MEG channels on an HTML5 canvas with:
 3. Compatible with MNE-Python's annotation format
 ```
 
-**JSON format:**
+### Annotation File Formats
+
+The platform supports importing annotations in JSON and CSV formats. See `examples/` directory for sample files.
+
+**JSON Format (examples/annotations_example.json):**
 ```json
 [
   {
-    "id": "ann_1",
-    "onset": 10.5,
+    "onset": 2.5,
+    "duration": 1.0,
+    "description": "BAD_artifact"
+  },
+  {
+    "onset": 10.3,
+    "duration": 0.5,
+    "description": "Eye_blink"
+  },
+  {
+    "onset": 15.7,
     "duration": 2.0,
-    "description": "BAD_artifact",
-    "user": "researcher1"
+    "description": "Movement_artifact"
   }
 ]
 ```
 
-**CSV format:**
+**Required fields:**
+- `onset` (number): Start time in seconds
+- `duration` (number): Duration in seconds  
+- `description` (string): Annotation label/type
+
+**Optional fields:**
+- `user` (string): Username (defaults to "imported")
+- `id` (string): Unique identifier (auto-generated if missing)
+
+**CSV Format (examples/annotations_example.csv):**
 ```csv
-onset,duration,description,user
-10.5,2.0,BAD_artifact,researcher1
+onset,duration,description
+2.5,1.0,BAD_artifact
+10.3,0.5,Eye_blink
+15.7,2.0,Movement_artifact
+25.0,1.5,Custom_event
 ```
+
+**CSV Requirements:**
+- Header row must include: `onset`, `duration`, `description`
+- Values must be comma-separated
+- No quotes needed unless description contains commas
+- Times in seconds (float values supported)
 
 ### 5. Multi-User Collaboration
 

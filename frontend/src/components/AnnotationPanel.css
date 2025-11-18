@@ -18,6 +18,20 @@
 .export-buttons {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.export-buttons label.secondary-btn {
+  display: inline-block;
+  text-align: center;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 4px;
+  transition: opacity 0.2s;
 }
 
 .annotation-form {
@@ -86,6 +100,14 @@
   background: #f9f9f9;
 }
 
+.annotation-list tr.auto-detected {
+  background: #f0f7ff;
+}
+
+.annotation-list tr.auto-detected:hover {
+  background: #e3f2fd;
+}
+
 .annotation-badge {
   display: inline-block;
   padding: 0.25rem 0.75rem;
@@ -93,6 +115,21 @@
   color: white;
   font-size: 0.85rem;
   font-weight: 500;
+}
+
+.method-info {
+  font-size: 0.75rem;
+  color: #666;
+  margin-top: 0.25rem;
+  font-style: italic;
+}
+
+.detection-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  font-weight: bold;
 }
 
 .small-btn {

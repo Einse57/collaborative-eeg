@@ -57,11 +57,18 @@ class MNEService:
             except:
                 pass
         
+        # Calculate duration safely
+        try:
+            duration = float(raw.times[-1]) if len(raw.times) > 0 else 0.0
+        except:
+            # Fallback calculation if times array is problematic
+            duration = float(len(raw.times)) / float(raw.info['sfreq']) if raw.info['sfreq'] > 0 else 0.0
+        
         return {
             'n_channels': len(raw.ch_names),
             'n_samples': len(raw.times),
             'sampling_rate': raw.info['sfreq'],
-            'duration': raw.times[-1],
+            'duration': duration,
             'channel_names': raw.ch_names,
             'channel_types': channel_types,
             'meas_date': meas_date_str,
@@ -83,6 +90,22 @@ class MNEService:
         
         raw = self.loaded_datasets[dataset_id]
         sfreq = raw.info['sfreq']
+        
+        # Validate and sanitize inputs to prevent NaN/inf issues
+        import math
+        if not math.isfinite(start_time) or not math.isfinite(duration):
+            raise ValueError(f"Invalid time parameters: start_time={start_time}, duration={duration}")
+        
+        # Ensure non-negative values
+        start_time = max(0, start_time)
+        duration = max(0.1, duration)
+        
+        # Ensure we don't go beyond the recording
+        max_time = raw.times[-1]
+        if start_time >= max_time:
+            start_time = max(0, max_time - duration)
+        if start_time + duration > max_time:
+            duration = max_time - start_time
         
         start_sample = int(start_time * sfreq)
         end_sample = int((start_time + duration) * sfreq)

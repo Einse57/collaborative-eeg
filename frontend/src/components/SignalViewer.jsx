@@ -1,14 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import axios from 'axios'
 import './SignalViewer.css'
 
-// API URL from environment variable, fallback to localhost
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = 'http://localhost:8000'
 
-function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotationCreate }) {
-  console.log('SignalViewer rendered')
-  console.log('Dataset:', dataset)
-  console.log('Dataset metadata:', dataset?.metadata)
+function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotationCreate, onAnnotationsRefresh }) {
+  console.log('SignalViewer component rendered with dataset:', dataset?.id)
   
   const canvasRef = useRef(null)
   const containerRef = useRef(null)
@@ -21,6 +18,14 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
   const [dragStart, setDragStart] = useState(null)
   const [selectedDescription, setSelectedDescription] = useState('BAD_artifact')  // For new annotations
   const [maxChannelsToShow, setMaxChannelsToShow] = useState(20)  // Limit initially for performance
+  const [selectedAnnotation, setSelectedAnnotation] = useState(null)  // Currently selected annotation for editing
+  const [dragMode, setDragMode] = useState(null)  // 'left', 'right', 'move', or null
+  const [editingAnnotation, setEditingAnnotation] = useState(null)  // Copy of annotation being edited
+  
+  // Refs for performance optimization
+  const debounceTimerRef = useRef(null)
+  const rafIdRef = useRef(null)
+  const lastViewportStartRef = useRef(viewportStart)
 
   // Load signal data when viewport changes
   useEffect(() => {
@@ -44,24 +49,35 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
   }, [signalData, annotations, amplitudeScale, selectedDescription, maxChannelsToShow])
 
   const loadSignalData = async () => {
-    console.log('=== loadSignalData called ===')
-    console.log('Dataset ID:', dataset?.id)
-    console.log('API_URL:', API_URL)
-    
     setLoading(true)
     try {
-      console.log('Loading signal data...')
-      const url = `${API_URL}/api/datasets/${dataset.id}/data`
-      console.log('Request URL:', url)
+      // Validate parameters before sending - check for NaN and infinity
+      if (!isFinite(viewportStart) || !isFinite(viewportDuration)) {
+        console.error('Invalid viewport values:', { viewportStart, viewportDuration })
+        setLoading(false)
+        return
+      }
       
-      const response = await axios.get(url, {
-        params: {
-          start_time: viewportStart,
-          duration: viewportDuration,
-          downsample: 2
-        }
+      const startTime = Math.max(0, viewportStart)
+      const duration = Math.max(0.1, Math.min(viewportDuration, dataset.duration || 3600))
+      
+      console.log('Loading signal data with params:', {
+        start_time: startTime,
+        duration: duration,
+        dataset_id: dataset.id,
+        dataset_duration: dataset.duration
       })
-      console.log('Response received:', response.data)
+      
+      const response = await axios.get(
+        `${API_URL}/api/datasets/${dataset.id}/data`,
+        {
+          params: {
+            start_time: startTime,
+            duration: duration,
+            downsample: 2
+          }
+        }
+      )
       console.log('Signal data loaded:', response.data.channel_names?.length, 'channels')
       setSignalData(response.data)
     } catch (error) {
@@ -257,14 +273,29 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
         borderColor = 'rgba(33, 150, 243, 1.0)'
       }
 
+      // Check if this annotation is selected
+      const isSelected = selectedAnnotation && selectedAnnotation.id === ann.id
+
       // Draw annotation rectangle
       ctx.fillStyle = color
       ctx.fillRect(x, 0, width, height)
 
-      // Draw border
-      ctx.strokeStyle = borderColor
-      ctx.lineWidth = 2
+      // Draw border (thicker if selected)
+      ctx.strokeStyle = isSelected ? '#ff9800' : borderColor
+      ctx.lineWidth = isSelected ? 4 : 2
       ctx.strokeRect(x, 0, width, height)
+
+      // Draw drag handles if selected
+      if (isSelected) {
+        const handleWidth = 8
+        ctx.fillStyle = '#ff9800'
+        // Left handle
+        ctx.fillRect(x - handleWidth / 2, height / 2 - 20, handleWidth, 40)
+        // Right handle
+        ctx.fillRect(x + width - handleWidth / 2, height / 2 - 20, handleWidth, 40)
+        // Move indicator (top center)
+        ctx.fillRect(x + width / 2 - 15, 0, 30, 8)
+      }
 
       // Draw label with background for better visibility
       ctx.font = 'bold 12px Arial'
@@ -283,95 +314,295 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
     })
   }
 
+  const handleMouseHover = (e) => {
+    if (isDragging) return
+    
+    const canvas = canvasRef.current
+    if (!canvas) return
+    
+    const rect = canvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const time = viewportStart + (x / rect.width) * viewportDuration
+    const pixelsPerSecond = rect.width / viewportDuration
+
+    // Check if hovering over an annotation
+    const hoveredAnnotation = annotations.find(ann => {
+      if (ann.onset + ann.duration < viewportStart || ann.onset > viewportStart + viewportDuration) {
+        return false
+      }
+      const annX = (ann.onset - viewportStart) * pixelsPerSecond
+      const annWidth = ann.duration * pixelsPerSecond
+      return x >= annX && x <= annX + annWidth
+    })
+
+    if (hoveredAnnotation) {
+      const annX = (hoveredAnnotation.onset - viewportStart) * pixelsPerSecond
+      const annWidth = hoveredAnnotation.duration * pixelsPerSecond
+      const handleZone = 10
+
+      if (x < annX + handleZone) {
+        canvas.style.cursor = 'ew-resize' // Left edge
+      } else if (x > annX + annWidth - handleZone) {
+        canvas.style.cursor = 'ew-resize' // Right edge
+      } else {
+        canvas.style.cursor = 'move' // Middle
+      }
+    } else {
+      canvas.style.cursor = 'crosshair' // Default for creating new
+    }
+  }
+
   const handleMouseDown = (e) => {
     const canvas = canvasRef.current
     const rect = canvas.getBoundingClientRect()
-    // Use the actual displayed width from bounding rect, not canvas.width
     const x = e.clientX - rect.left
     const time = viewportStart + (x / rect.width) * viewportDuration
+    const pixelsPerSecond = rect.width / viewportDuration
 
-    setIsDragging(true)
-    setDragStart({ x, time })
+    // Check if clicking on an existing annotation
+    const clickedAnnotation = annotations.find(ann => {
+      if (ann.onset + ann.duration < viewportStart || ann.onset > viewportStart + viewportDuration) {
+        return false
+      }
+      const annX = (ann.onset - viewportStart) * pixelsPerSecond
+      const annWidth = ann.duration * pixelsPerSecond
+      return x >= annX && x <= annX + annWidth
+    })
+
+    if (clickedAnnotation) {
+      // Check if clicking on edges or middle
+      const annX = (clickedAnnotation.onset - viewportStart) * pixelsPerSecond
+      const annWidth = clickedAnnotation.duration * pixelsPerSecond
+      const handleZone = 10 // pixels
+
+      if (x < annX + handleZone) {
+        // Left edge
+        setDragMode('left')
+      } else if (x > annX + annWidth - handleZone) {
+        // Right edge
+        setDragMode('right')
+      } else {
+        // Middle - move entire annotation
+        setDragMode('move')
+      }
+
+      setSelectedAnnotation(clickedAnnotation)
+      setEditingAnnotation({ ...clickedAnnotation })
+      setIsDragging(true)
+      setDragStart({ x, time })
+    } else {
+      // Creating new annotation
+      setSelectedAnnotation(null)
+      setDragMode(null)
+      setEditingAnnotation(null)
+      setIsDragging(true)
+      setDragStart({ x, time })
+    }
   }
 
   const handleMouseMove = (e) => {
     if (!isDragging || !dragStart) return
 
-    const canvas = canvasRef.current
-    const rect = canvas.getBoundingClientRect()
-    const currentX = e.clientX - rect.left
+    // Cancel any pending animation frame
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current)
+    }
 
-    // Re-render with preview
-    renderCanvas()
-    const ctx = canvas.getContext('2d')
-    
-    // Calculate current time from mouse position
-    const currentTime = viewportStart + (currentX / rect.width) * viewportDuration
-    const previewDuration = Math.abs(currentTime - dragStart.time)
-    const previewStart = Math.min(dragStart.time, currentTime)
-    
-    // Convert time coordinates to canvas pixel coordinates
-    const pixelsPerSecond = canvas.width / viewportDuration
-    const startXCanvas = (previewStart - viewportStart) * pixelsPerSecond
-    const widthCanvas = previewDuration * pixelsPerSecond
+    // Throttle re-renders using requestAnimationFrame
+    rafIdRef.current = requestAnimationFrame(() => {
+      const canvas = canvasRef.current
+      const rect = canvas.getBoundingClientRect()
+      const currentX = e.clientX - rect.left
+      const currentTime = viewportStart + (currentX / rect.width) * viewportDuration
 
-    // Draw preview rectangle
-    ctx.fillStyle = 'rgba(33, 150, 243, 0.4)'
-    ctx.fillRect(startXCanvas, 0, widthCanvas, canvas.height)
-    
-    // Draw preview label
-    ctx.font = 'bold 12px Arial'
-    const labelText = `${selectedDescription} (${previewDuration.toFixed(2)}s)`
-    const textMetrics = ctx.measureText(labelText)
-    
-    // Draw label background
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-    ctx.fillRect(startXCanvas + 5, 5, textMetrics.width + 6, 16)
-    
-    // Draw label text
-    ctx.fillStyle = '#000'
-    ctx.fillText(labelText, startXCanvas + 8, 17)
+      // Re-render base canvas
+      renderCanvas()
+      const ctx = canvas.getContext('2d')
+      const pixelsPerSecond = canvas.width / viewportDuration
+
+      if (editingAnnotation && dragMode) {
+        // Editing existing annotation
+        let previewOnset = editingAnnotation.onset
+        let previewDuration = editingAnnotation.duration
+
+        if (dragMode === 'left') {
+          // Adjust start time
+          const newOnset = currentTime
+          const newDuration = (editingAnnotation.onset + editingAnnotation.duration) - newOnset
+          if (newDuration > 0.1) {
+            previewOnset = newOnset
+            previewDuration = newDuration
+          }
+        } else if (dragMode === 'right') {
+          // Adjust end time
+          const newDuration = currentTime - editingAnnotation.onset
+          if (newDuration > 0.1) {
+            previewDuration = newDuration
+          }
+        } else if (dragMode === 'move') {
+          // Move entire annotation
+          const timeDelta = currentTime - dragStart.time
+          previewOnset = editingAnnotation.onset + timeDelta
+        }
+
+        // Draw preview of edited annotation
+        const previewX = (previewOnset - viewportStart) * pixelsPerSecond
+        const previewWidth = previewDuration * pixelsPerSecond
+
+        ctx.fillStyle = 'rgba(255, 152, 0, 0.5)'
+        ctx.fillRect(previewX, 0, previewWidth, canvas.height)
+        ctx.strokeStyle = '#ff9800'
+        ctx.lineWidth = 3
+        ctx.strokeRect(previewX, 0, previewWidth, canvas.height)
+
+        // Draw preview label
+        ctx.font = 'bold 12px Arial'
+        const labelText = `${editingAnnotation.description} (${previewDuration.toFixed(2)}s)`
+        const textMetrics = ctx.measureText(labelText)
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+        ctx.fillRect(previewX + 5, 5, textMetrics.width + 6, 16)
+        ctx.fillStyle = '#000'
+        ctx.fillText(labelText, previewX + 8, 17)
+      } else {
+        // Creating new annotation
+        const previewDuration = Math.abs(currentTime - dragStart.time)
+        const previewStart = Math.min(dragStart.time, currentTime)
+        const startXCanvas = (previewStart - viewportStart) * pixelsPerSecond
+        const widthCanvas = previewDuration * pixelsPerSecond
+
+        ctx.fillStyle = 'rgba(33, 150, 243, 0.4)'
+        ctx.fillRect(startXCanvas, 0, widthCanvas, canvas.height)
+        
+        ctx.font = 'bold 12px Arial'
+        const labelText = `${selectedDescription} (${previewDuration.toFixed(2)}s)`
+        const textMetrics = ctx.measureText(labelText)
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+        ctx.fillRect(startXCanvas + 5, 5, textMetrics.width + 6, 16)
+        ctx.fillStyle = '#000'
+        ctx.fillText(labelText, startXCanvas + 8, 17)
+      }
+    })
   }
 
-  const handleMouseUp = (e) => {
+  const handleMouseUp = async (e) => {
     if (!isDragging || !dragStart) return
+
+    // Cancel any pending animation frame
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
 
     const canvas = canvasRef.current
     const rect = canvas.getBoundingClientRect()
     const endX = e.clientX - rect.left
     const endTime = viewportStart + (endX / rect.width) * viewportDuration
 
-    const onset = Math.min(dragStart.time, endTime)
-    const duration = Math.abs(endTime - dragStart.time)
+    if (editingAnnotation && dragMode) {
+      // Update existing annotation
+      let newOnset = editingAnnotation.onset
+      let newDuration = editingAnnotation.duration
 
-    if (duration > 0.1) {
-      onAnnotationCreate?.({ 
-        onset, 
-        duration,
-        description: selectedDescription  // Use selected description
-      })
+      if (dragMode === 'left') {
+        newOnset = endTime
+        newDuration = (editingAnnotation.onset + editingAnnotation.duration) - newOnset
+      } else if (dragMode === 'right') {
+        newDuration = endTime - editingAnnotation.onset
+      } else if (dragMode === 'move') {
+        const timeDelta = endTime - dragStart.time
+        newOnset = editingAnnotation.onset + timeDelta
+      }
+
+      // Clear dragging state immediately for instant visual feedback
+      setIsDragging(false)
+      setDragStart(null)
+      setDragMode(null)
+      setEditingAnnotation(null)
+      setSelectedAnnotation(null)
+      
+      if (newDuration > 0.1 && (Math.abs(newOnset - editingAnnotation.onset) > 0.01 || Math.abs(newDuration - editingAnnotation.duration) > 0.01)) {
+        // Save updated annotation in background (don't await)
+        axios.put(
+          `${API_URL}/api/annotations/${editingAnnotation.id}?dataset_id=${dataset.id}`,
+          {
+            onset: newOnset,
+            duration: newDuration,
+            description: editingAnnotation.description
+          }
+        ).then(() => {
+          // Refresh annotations from parent after successful save
+          if (onAnnotationsRefresh) {
+            onAnnotationsRefresh()
+          }
+        }).catch((error) => {
+          console.error('Error updating annotation:', error)
+          alert('Error updating annotation: ' + (error.response?.data?.detail || error.message))
+          // Refresh to revert to server state
+          if (onAnnotationsRefresh) {
+            onAnnotationsRefresh()
+          }
+        })
+      }
+    } else {
+      // Creating new annotation
+      const onset = Math.min(dragStart.time, endTime)
+      const duration = Math.abs(endTime - dragStart.time)
+
+      // Clear dragging state immediately
+      setIsDragging(false)
+      setDragStart(null)
+      setDragMode(null)
+      setEditingAnnotation(null)
+
+      if (duration > 0.1) {
+        onAnnotationCreate?.({ 
+          onset, 
+          duration,
+          description: selectedDescription
+        })
+      }
     }
 
-    setIsDragging(false)
-    setDragStart(null)
     renderCanvas()
   }
 
   const panLeft = () => {
-    setViewportStart(Math.max(0, viewportStart - viewportDuration * 0.5))
+    if (loading || !dataset) return  // Prevent multiple clicks while loading
+    const newStart = Math.max(0, viewportStart - viewportDuration * 0.5)
+    console.log('Pan left: from', viewportStart, 'to', newStart)
+    setViewportStart(newStart)
   }
 
   const panRight = () => {
-    const maxStart = dataset.duration - viewportDuration
-    setViewportStart(Math.min(maxStart, viewportStart + viewportDuration * 0.5))
+    if (loading || !dataset) return  // Prevent multiple clicks while loading
+    const maxStart = Math.max(0, (dataset.duration || 0) - viewportDuration)
+    const newStart = Math.min(maxStart, viewportStart + viewportDuration * 0.5)
+    console.log('Pan right: from', viewportStart, 'to', newStart, 'max:', maxStart)
+    setViewportStart(newStart)
   }
 
   const zoomIn = () => {
-    setViewportDuration(Math.max(1, viewportDuration / 1.5))
+    if (!dataset || !isFinite(viewportDuration)) return
+    const newDuration = Math.max(0.5, viewportDuration / 1.5)
+    setViewportDuration(newDuration)
+    // Adjust viewport start if needed to stay in bounds
+    if (viewportStart + newDuration > dataset.duration) {
+      setViewportStart(Math.max(0, dataset.duration - newDuration))
+    }
   }
 
   const zoomOut = () => {
-    setViewportDuration(Math.min(dataset.duration, viewportDuration * 1.5))
+    if (!dataset || !isFinite(viewportDuration)) return
+    
+    // Use a large default if dataset.duration is not available
+    const maxDuration = isFinite(dataset.duration) ? dataset.duration : 3600
+    const newDuration = Math.min(maxDuration, viewportDuration * 1.5)
+    setViewportDuration(newDuration)
+    
+    // Adjust viewport start if needed to stay in bounds
+    if (isFinite(dataset.duration) && viewportStart + newDuration > dataset.duration) {
+      setViewportStart(Math.max(0, dataset.duration - newDuration))
+    }
   }
 
   const scaleUp = () => {
@@ -395,6 +626,41 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
     const totalChannels = signalData?.channel_names.length || 0
     setMaxChannelsToShow(totalChannels)
   }
+  
+  // Debounced slider handler to prevent excessive API calls
+  const handleSliderChange = useCallback((e) => {
+    const newValue = parseFloat(e.target.value)
+    
+    // Update display immediately for responsive feel
+    lastViewportStartRef.current = newValue
+    
+    // Clear existing debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+    
+    // Set new debounce timer (300ms delay)
+    debounceTimerRef.current = setTimeout(() => {
+      setViewportStart(newValue)
+    }, 300)
+  }, [])
+  
+  // Sync ref with state (for button clicks and completed debounce)
+  useEffect(() => {
+    lastViewportStartRef.current = viewportStart
+  }, [viewportStart])
+  
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current)
+      }
+    }
+  }, [])
   
   // Base annotation types
   const baseAnnotationTypes = [
@@ -455,22 +721,45 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
       {loading && <div className="loading-overlay">⏳ Loading data...</div>}
 
       {/* Time scrollbar */}
-      {dataset && dataset.metadata && (
-        <div style={{ marginBottom: '10px' }}>
-          <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block' }}>
-            Time Navigation: {viewportStart.toFixed(1)}s / {dataset.metadata.duration?.toFixed(1) || '?'}s
-          </label>
-          <input
-            type="range"
-            min="0"
-            max={Math.max(0, (dataset.metadata.duration || 0) - viewportDuration)}
-            step="0.1"
-            value={viewportStart}
-            onChange={(e) => setViewportStart(parseFloat(e.target.value))}
-            style={{ width: '100%', cursor: 'pointer' }}
-          />
-        </div>
-      )}
+      {dataset && signalData && (() => {
+        const effectiveDuration = dataset.duration || dataset.metadata?.duration || 3600
+        const maxSlider = Math.max(1, effectiveDuration - viewportDuration)
+        const isDisabled = !effectiveDuration || effectiveDuration <= viewportDuration
+        
+        console.log('Slider state:', { 
+          duration: dataset.duration, 
+          metaDuration: dataset.metadata?.duration,
+          effectiveDuration, 
+          maxSlider, 
+          isDisabled,
+          viewportDuration 
+        })
+        
+        return (
+          <div style={{ marginBottom: '10px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '5px', display: 'block' }}>
+              Time Navigation: {lastViewportStartRef.current.toFixed(1)}s / {effectiveDuration?.toFixed(1) || '?'}s
+            </label>
+            <input
+              type="range"
+              min="0"
+              max={maxSlider}
+              step="0.1"
+              value={lastViewportStartRef.current}
+              onChange={handleSliderChange}
+              onInput={(e) => {
+                // Update ref immediately for smooth visual feedback
+                lastViewportStartRef.current = parseFloat(e.target.value)
+                // Force re-render of label only (not canvas)
+                e.target.previousElementSibling.textContent = 
+                  `Time Navigation: ${lastViewportStartRef.current.toFixed(1)}s / ${effectiveDuration?.toFixed(1) || '?'}s`
+              }}
+              style={{ width: '100%', cursor: isDisabled ? 'not-allowed' : 'pointer' }}
+              disabled={isDisabled}
+            />
+          </div>
+        )
+      })()}
 
       <div className="canvas-container" style={{ maxHeight: '600px', overflowY: 'auto', overflowX: 'hidden' }}>
         <canvas
@@ -478,15 +767,18 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
           width={1200}
           height={600}
           onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
+          onMouseMove={(e) => {
+            handleMouseHover(e)
+            handleMouseMove(e)
+          }}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          style={{ cursor: isDragging ? 'col-resize' : 'crosshair', display: 'block' }}
+          style={{ display: 'block' }}
         />
       </div>
 
       <div className="viewer-instructions">
-        💡 <strong>Tip:</strong> Click and drag horizontally to create a "{selectedDescription}" annotation. Scroll vertically to see all channels.
+        💡 <strong>Tip:</strong> Click and drag to create a "{selectedDescription}" annotation. Click an annotation to select it, then drag edges to resize or middle to move. Scroll vertically to see all channels.
       </div>
     </div>
   )

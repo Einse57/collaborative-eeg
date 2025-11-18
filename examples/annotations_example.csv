@@ -1,0 +1,6 @@
+onset,duration,description
+2.5,1.0,BAD_artifact
+10.3,0.5,Eye_blink
+15.7,2.0,Movement_artifact
+25.0,1.5,Custom_event
+30.2,0.8,Noise

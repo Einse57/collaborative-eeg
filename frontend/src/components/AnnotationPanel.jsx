@@ -5,9 +5,12 @@ import './AnnotationPanel.css'
 // API URL from environment variable, fallback to localhost
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-function AnnotationPanel({ datasetId, annotations, customAnnotationTypes, onCustomTypesChange, onAnnotationsChange, socket }) {
+function AnnotationPanel({ datasetId, selectedDataset, annotations, customAnnotationTypes, onCustomTypesChange, onAnnotationsChange, socket }) {
   const [filter, setFilter] = useState('')
   const [customTypeName, setCustomTypeName] = useState('')
+  
+  // Check if the dataset is an EDF file (for conditional Export EDF+ button)
+  const isEDFFile = selectedDataset?.filename?.toLowerCase().endsWith('.edf')
 
   // Common annotation types
   const baseAnnotationTypes = [
@@ -91,6 +94,30 @@ function AnnotationPanel({ datasetId, annotations, customAnnotationTypes, onCust
       }
     } catch (error) {
       alert('Error exporting annotations: ' + error.message)
+    }
+  }
+
+  const handleExportEDFPlus = async () => {
+    try {
+      const response = await axios.get(
+        `${API_URL}/api/datasets/${datasetId}/export/edfplus`,
+        { responseType: 'blob' }
+      )
+      
+      // Create a download link
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `dataset_${datasetId}_with_annotations.edf`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      
+      alert('Successfully exported dataset with annotations to EDF+ format!')
+    } catch (error) {
+      const errorMsg = error.response?.data?.detail || error.message
+      alert(`Error exporting to EDF+: ${errorMsg}`)
     }
   }
 
@@ -192,6 +219,23 @@ function AnnotationPanel({ datasetId, annotations, customAnnotationTypes, onCust
     return '#ff9800'
   }
 
+  const isEventDetection = (user) => {
+    return user === 'EventDetector_RF' || user === 'EventDetector_CNN' ||
+           user === 'SeizureDetector_RF' || user === 'SeizureDetector_CNN'  // backwards compatibility
+  }
+
+  const getDetectionMethodLabel = (user) => {
+    if (user === 'EventDetector_RF' || user === 'SeizureDetector_RF') return '🌲 RF'
+    if (user === 'EventDetector_CNN' || user === 'SeizureDetector_CNN') return '🔷 CNN'
+    return ''
+  }
+
+  const getDetectionMethodColor = (user) => {
+    if (user === 'EventDetector_RF' || user === 'SeizureDetector_RF') return '#2e7d32'
+    if (user === 'EventDetector_CNN' || user === 'SeizureDetector_CNN') return '#1565c0'
+    return '#666'
+  }
+
   const filteredAnnotations = annotations.filter(ann =>
     ann.description.toLowerCase().includes(filter.toLowerCase())
   )
@@ -222,6 +266,15 @@ function AnnotationPanel({ datasetId, annotations, customAnnotationTypes, onCust
           >
             📄 Export CSV
           </button>
+          {!isEDFFile && (
+            <button 
+              className="secondary-btn"
+              onClick={handleExportEDFPlus}
+              title="Export dataset with all annotations to EDF+ format"
+            >
+              📥 Export EDF+
+            </button>
+          )}
         </div>
       </div>
 
@@ -230,7 +283,7 @@ function AnnotationPanel({ datasetId, annotations, customAnnotationTypes, onCust
         <div className="form-row">
           <input
             type="text"
-            placeholder="e.g., Seizure, Artifact_noise, etc."
+            placeholder="e.g., Event, Artifact_noise, etc."
             value={customTypeName}
             onChange={(e) => setCustomTypeName(e.target.value)}
             style={{flex: 1}}
@@ -265,13 +318,13 @@ function AnnotationPanel({ datasetId, annotations, customAnnotationTypes, onCust
                 <th>Time</th>
                 <th>Duration</th>
                 <th>Description</th>
-                <th>User</th>
+                <th>User/Method</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredAnnotations.map(ann => (
-                <tr key={ann.id}>
+                <tr key={ann.id} className={isEventDetection(ann.user) ? 'auto-detected' : ''}>
                   <td>{formatTime(ann.onset)}</td>
                   <td>{ann.duration.toFixed(2)}s</td>
                   <td>
@@ -281,8 +334,31 @@ function AnnotationPanel({ datasetId, annotations, customAnnotationTypes, onCust
                     >
                       {ann.description}
                     </span>
+                    {isEventDetection(ann.user) && ann.confidence !== undefined && (
+                      <div className="method-info" title={ann.method}>
+                        Confidence: {(ann.confidence * 100).toFixed(1)}%
+                      </div>
+                    )}
                   </td>
-                  <td>{ann.user || 'Unknown'}</td>
+                  <td>
+                    {isEventDetection(ann.user) ? (
+                      <span 
+                        className="detection-badge"
+                        style={{ 
+                          backgroundColor: getDetectionMethodColor(ann.user),
+                          color: 'white',
+                          padding: '2px 8px',
+                          borderRadius: '3px',
+                          fontSize: '0.85em',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        {getDetectionMethodLabel(ann.user)}
+                      </span>
+                    ) : (
+                      ann.user || 'Unknown'
+                    )}
+                  </td>
                   <td>
                     <button
                       className="danger-btn small-btn"

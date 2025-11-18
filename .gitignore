@@ -36,9 +36,14 @@ Thumbs.db
 
 # Application specific
 uploads/
+datasets/
 eeg_annotations.db
 *.db
 *.sqlite
+
+# Detection plugins (examples - customize per deployment)
+backend/plugins/detection/rf_plugin.py
+backend/plugins/detection/cnn_plugin.py
 
 # Environment and secrets
 .env

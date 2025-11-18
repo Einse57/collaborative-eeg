@@ -38,6 +38,68 @@
   margin-top: 0.5rem;
 }
 
+.event-detection-section {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.export-section {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.export-btn {
+  width: 100%;
+  margin-top: 0.5rem;
+  background-color: #388e3c;
+  color: white;
+  font-weight: 500;
+}
+
+.export-btn:hover:not(:disabled) {
+  background-color: #2e7d32;
+}
+
+.detection-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.detection-btn {
+  flex: 1;
+  min-width: 120px;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: white;
+}
+
+.detection-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  filter: brightness(1.1);
+}
+
+.detection-btn:disabled {
+  cursor: not-allowed;
+}
+
+.hint-message {
+  color: #999;
+  font-size: 0.75rem;
+  text-align: center;
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
 .dataset-list {
   flex: 1;
   overflow-y: auto;
@@ -70,11 +132,41 @@
   border-width: 2px;
 }
 
+.dataset-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
 .dataset-name {
   font-weight: 500;
-  margin-bottom: 0.5rem;
   color: #333;
   word-break: break-word;
+  flex: 1;
+}
+
+.delete-dataset-btn {
+  background: transparent;
+  border: none;
+  color: #999;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.2s;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+}
+
+.delete-dataset-btn:hover {
+  background: #ffebee;
+  color: #f44336;
 }
 
 .dataset-info {

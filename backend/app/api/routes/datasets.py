@@ -92,7 +92,19 @@ async def get_dataset(dataset_id: str):
             print(f"Error reloading dataset {dataset_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Could not reload dataset: {str(e)}")
     
-    return dataset
+    # Ensure we have the complete metadata including duration
+    response = {
+        'id': dataset['id'],
+        'filename': dataset['filename'],
+        'file_path': dataset['file_path'],
+        'duration': dataset['metadata'].get('duration'),
+        'n_channels': dataset['metadata'].get('n_channels'),
+        'sampling_rate': dataset['metadata'].get('sampling_rate'),
+        'metadata': dataset['metadata'],
+        'annotations': dataset.get('annotations', [])
+    }
+    print(f"Returning dataset {dataset_id} with duration: {response['duration']}")
+    return response
 
 @router.get("/{dataset_id}/data")
 async def get_dataset_data(

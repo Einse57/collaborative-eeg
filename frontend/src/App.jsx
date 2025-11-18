@@ -197,6 +197,7 @@ function App() {
             onDatasetSelect={handleDatasetSelect}
             onUploadSuccess={handleUploadSuccess}
             onLoadDatasets={loadDatasets}
+            onAnnotationsRefresh={() => selectedDataset && loadAnnotations(selectedDataset.id)}
           />
         </aside>
 
@@ -211,9 +212,11 @@ function App() {
                 annotations={annotations}
                 customAnnotationTypes={customAnnotationTypes}
                 onAnnotationCreate={handleAnnotationCreate}
+                onAnnotationsRefresh={() => loadAnnotations(selectedDataset.id)}
               />
               <AnnotationPanel
                 datasetId={selectedDataset.id}
+                selectedDataset={selectedDataset}
                 annotations={annotations}
                 customAnnotationTypes={customAnnotationTypes}
                 onCustomTypesChange={setCustomAnnotationTypes}
