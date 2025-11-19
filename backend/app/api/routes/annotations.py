@@ -1,15 +1,13 @@
 """
 Annotation API routes
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 from ...services.mne_service import mne_service
 
-router = APIRouter()
-
-# In-memory storage for annotations (will use database later)
+router = APIRouter()# In-memory storage for annotations (will use database later)
 annotations_db = {}
 
 class AnnotationCreate(BaseModel):
@@ -57,7 +55,7 @@ async def get_annotations(dataset_id: str):
     return {'annotations': list(annotations_db[dataset_id].values())}
 
 @router.post("/")
-async def create_annotation(annotation: AnnotationCreate):
+async def create_annotation(annotation: AnnotationCreate, request: Request):
     """Create a new annotation"""
     dataset_id = annotation.dataset_id
     
@@ -86,13 +84,21 @@ async def create_annotation(annotation: AnnotationCreate):
     except Exception as e:
         print(f"Warning: Could not persist annotations to file: {e}")
     
+    # Broadcast to other users via Socket.IO
+    try:
+        sio = request.app.state.sio
+        await sio.emit('annotation_created', new_annotation, room=f"dataset_{dataset_id}")
+    except Exception as e:
+        print(f"Warning: Could not broadcast annotation_created: {e}")
+    
     return new_annotation
 
 @router.put("/{annotation_id}")
 async def update_annotation(
     annotation_id: str,
     dataset_id: str,
-    update: AnnotationUpdate
+    update: AnnotationUpdate,
+    request: Request
 ):
     """Update an existing annotation"""
     if dataset_id not in annotations_db or annotation_id not in annotations_db[dataset_id]:
@@ -116,10 +122,17 @@ async def update_annotation(
     except Exception as e:
         print(f"Warning: Could not persist annotations to file: {e}")
     
+    # Broadcast to other users via Socket.IO
+    try:
+        sio = request.app.state.sio
+        await sio.emit('annotation_updated', annotation, room=f"dataset_{dataset_id}")
+    except Exception as e:
+        print(f"Warning: Could not broadcast annotation_updated: {e}")
+    
     return annotation
 
 @router.delete("/{annotation_id}")
-async def delete_annotation(annotation_id: str, dataset_id: str):
+async def delete_annotation(annotation_id: str, dataset_id: str, request: Request):
     """Delete an annotation"""
     if dataset_id not in annotations_db or annotation_id not in annotations_db[dataset_id]:
         raise HTTPException(status_code=404, detail="Annotation not found")
@@ -132,6 +145,13 @@ async def delete_annotation(annotation_id: str, dataset_id: str):
         mne_service.persist_annotations_to_file(dataset_id, all_annotations)
     except Exception as e:
         print(f"Warning: Could not persist annotations to file: {e}")
+    
+    # Broadcast to other users via Socket.IO
+    try:
+        sio = request.app.state.sio
+        await sio.emit('annotation_deleted', {'id': annotation_id, 'dataset_id': dataset_id}, room=f"dataset_{dataset_id}")
+    except Exception as e:
+        print(f"Warning: Could not broadcast annotation_deleted: {e}")
     
     return {"message": "Annotation deleted successfully"}
 

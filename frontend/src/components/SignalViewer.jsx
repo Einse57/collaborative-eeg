@@ -4,7 +4,7 @@ import './SignalViewer.css'
 
 const API_URL = 'http://localhost:8000'
 
-function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotationCreate, onAnnotationsRefresh }) {
+function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotationCreate, onAnnotationsRefresh, socket, currentUser }) {
   console.log('SignalViewer component rendered with dataset:', dataset?.id)
   
   const canvasRef = useRef(null)
@@ -529,7 +529,16 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
             duration: newDuration,
             description: editingAnnotation.description
           }
-        ).then(() => {
+        ).then((response) => {
+          // Emit socket event to notify other users
+          if (socket && socket.connected) {
+            socket.emit('annotation_updated', {
+              ...response.data,
+              dataset_id: dataset.id,
+              user: currentUser
+            })
+          }
+          
           // Refresh annotations from parent after successful save
           if (onAnnotationsRefresh) {
             onAnnotationsRefresh()

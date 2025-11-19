@@ -37,6 +37,9 @@ sio = socketio.AsyncServer(
     cors_allowed_origins="*"  # Allow any origin for development/local network
 )
 
+# Store sio in app state so routes can access it
+app.state.sio = sio
+
 # Wrap with Socket.IO's ASGI app (AFTER all routes are registered!)
 socket_app = socketio.ASGIApp(sio, app)
 

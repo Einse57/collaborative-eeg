@@ -218,11 +218,13 @@ The platform includes PowerShell scripts for easy setup and deployment:
 - Enables network access from other computers
 - Only needed once per installation
 
-**start-network.ps1** - Alternative start with network features
-- Similar to `start.ps1` but with additional network diagnostics
-- Checks firewall configuration
-- Displays detailed network information
-- Use if you have network connectivity issues
+**start.ps1** - Main startup script with network options
+- `.\start.ps1` - Start in local mode (localhost only)
+- `.\start.ps1 -Network` - Start in network mode with diagnostics
+  - Detects network IP address
+  - Checks firewall configuration
+  - Enables access from other devices on your network
+  - Displays detailed network URLs for collaborators
 
 ### Quick Start Script
 
@@ -243,11 +245,18 @@ The platform is designed to work seamlessly on your local network:
 ```
 
 **3. Every time - Start the application:**
+
+For local use only:
 ```powershell
 .\start.ps1
 ```
 
-That's it! The `start.ps1` script automatically detects your IP and configures everything.
+For network access (multi-user):
+```powershell
+.\start.ps1 -Network
+```
+
+That's it! The network mode automatically detects your IP and displays URLs for collaborators.
 
 **For remote users:**
 - They simply browse to `http://YOUR_IP:3000`

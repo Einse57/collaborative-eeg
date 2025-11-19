@@ -213,6 +213,8 @@ function App() {
                 customAnnotationTypes={customAnnotationTypes}
                 onAnnotationCreate={handleAnnotationCreate}
                 onAnnotationsRefresh={() => loadAnnotations(selectedDataset.id)}
+                socket={socket}
+                currentUser={currentUser}
               />
               <AnnotationPanel
                 datasetId={selectedDataset.id}
