@@ -2,7 +2,22 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import axios from 'axios'
 import './SignalViewer.css'
 
-const API_URL = 'http://localhost:8000'
+// API URL detection:
+// - If accessed through nginx (port 80 or 443), use relative paths
+// - If accessed directly (port 3000), use localhost:8000
+// - Can be overridden with VITE_API_URL environment variable
+const getApiUrl = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  const port = window.location.port;
+  if (port === '' || port === '80' || port === '443') {
+    return window.location.origin;
+  }
+  return 'http://localhost:8000';
+};
+
+const API_URL = getApiUrl();
 
 function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotationCreate, onAnnotationsRefresh, socket, currentUser }) {
   console.log('SignalViewer component rendered with dataset:', dataset?.id)

@@ -405,3 +405,26 @@ Built with MNE-Python (https://mne.tools/)
 - Review console logs (browser DevTools and terminal)
 - Verify backend/frontend both running
 - Test with MNE sample data first
+
+### Uploading Datasets
+
+**Supported file formats:**
+- `.fif` - FIF files containing **raw data** (must end with `raw.fif`, `_meg.fif`, `_eeg.fif`, etc.)
+- `.edf` - European Data Format
+- `.bdf` - BioSemi Data Format
+- `.set` - EEGLAB format
+- `.vhdr` - BrainVision format
+
+**Important:** Not all `.fif` files contain raw data. Files like:
+- `*-cov.fif` (covariance matrices)
+- `*-eve.fif` (event files)
+- `*-trans.fif` (transformation matrices)
+- `*.ave` or `*-ave.fif` (averaged data)
+
+...cannot be loaded. Upload only **raw data files** that contain continuous EEG/MEG recordings.
+
+**Using MNE sample data:** If you have MNE sample data installed, use files like:
+- `sample_audvis_raw.fif` ✅
+- `sample_audvis_filt-0-40_raw.fif` ✅
+- NOT `sample_audvis-cov.fif` ❌
+

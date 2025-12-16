@@ -30,7 +30,17 @@ class MNEService:
         if not loader:
             raise ValueError(f"Unsupported file format: {file_ext}")
         
-        raw = loader(file_path, preload=False)
+        try:
+            raw = loader(file_path, preload=False)
+        except ValueError as e:
+            if "Could not find measurement data" in str(e):
+                raise ValueError(
+                    f"This file does not contain raw EEG/MEG data. "
+                    f"It may be a covariance matrix, forward solution, or other FIF file type. "
+                    f"Please upload a raw data file (should end with 'raw.fif' or '_meg.fif', '_eeg.fif', etc.)"
+                )
+            raise
+        
         dataset_id = Path(file_path).stem
         self.loaded_datasets[dataset_id] = raw
         self.dataset_file_paths[dataset_id] = file_path  # Track file path
