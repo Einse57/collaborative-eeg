@@ -17,6 +17,7 @@ if (-not $isAdmin) {
 Write-Host "Removing existing firewall rules (if any)..." -ForegroundColor Yellow
 Remove-NetFirewallRule -DisplayName "EEG Platform Backend" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "EEG Platform Frontend" -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "EEG Platform Port 80" -ErrorAction SilentlyContinue
 
 # Create new firewall rules
 Write-Host "Creating firewall rule for Backend (port 8000)..." -ForegroundColor Cyan
@@ -36,6 +37,15 @@ New-NetFirewallRule -DisplayName "EEG Platform Frontend" `
     -Action Allow `
     -Profile Domain,Private `
     -Description "Allows inbound connections to EEG Annotation Platform frontend"
+
+Write-Host "Creating firewall rule for Port 80 (HTTP - Enterprise Friendly)..." -ForegroundColor Cyan
+New-NetFirewallRule -DisplayName "EEG Platform Port 80" `
+    -Direction Inbound `
+    -LocalPort 80 `
+    -Protocol TCP `
+    -Action Allow `
+    -Profile Domain,Private,Public `
+    -Description "Allows HTTP access to EEG Annotation Platform on standard port 80 (firewall friendly)"
 
 # Verify rules were created
 Write-Host "`nVerifying firewall rules:" -ForegroundColor Green

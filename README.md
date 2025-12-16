@@ -128,10 +128,10 @@ npm install
 ```
 
 **Dependencies:**
-- react 18.2.0
-- vite 5.4.21
-- axios 1.6.2
-- socket.io-client 4.7.2
+- react ^18.2.0
+- vite ^5.0.0
+- axios ^1.6.0
+- socket.io-client ^4.7.2
 
 ## Running the Platform
 
@@ -181,11 +181,6 @@ Server runs at http://localhost:8000
 cd frontend
 npm run dev
 ```
-**Terminal 2 - Start Frontend:**
-```powershell
-cd frontend
-npm run dev
-```
 Client runs at http://localhost:3000
 
 **Note:** Manual start requires manually updating `frontend/.env` with your IP address if you want network access.
@@ -218,15 +213,13 @@ The platform includes PowerShell scripts for easy setup and deployment:
 - Enables network access from other computers
 - Only needed once per installation
 
-**start.ps1** - Main startup script with network options
-- `.\start.ps1` - Start in local mode (localhost only)
-- `.\start.ps1 -Network` - Start in network mode with diagnostics
-  - Detects network IP address
-  - Checks firewall configuration
-  - Enables access from other devices on your network
-  - Displays detailed network URLs for collaborators
-
-### Quick Start Script
+**start-port80.ps1** - Enterprise firewall-friendly startup (requires nginx)
+- `.\start-port80.ps1` - Start in local mode on port 80
+- `.\start-port80.ps1 -Network` - Start in network mode on port 80
+  - Must be run as Administrator
+  - Automatically copies nginx.conf to C:\nginx\conf\
+  - Serves entire platform on standard HTTP port 80
+  - Perfect for enterprise networks with strict firewall rules
 
 ## Network Access (Multi-User Setup)
 
@@ -264,6 +257,30 @@ That's it! The network mode automatically detects your IP and displays URLs for 
 - All users see the same datasets and annotations in real-time
 - Annotations sync automatically across all connected clients
 
+### Enterprise Networks & Firewall Issues
+
+**Having trouble connecting through corporate firewalls?** Many enterprise networks block non-standard ports (3000, 8000).
+
+**Solution: Use Port 80 (Standard HTTP)**
+
+The platform includes an nginx-based solution to serve everything on standard HTTP port 80, which works through most enterprise firewalls.
+
+**Setup for port 80:**
+
+1. **Download and install nginx:**
+   - Download from https://nginx.org/en/download.html
+   - Extract to `C:\nginx`
+
+2. **Run the startup script as Administrator:**
+   ```powershell
+   # The script will automatically copy nginx.conf to C:\nginx\conf\
+   .\start-port80.ps1 -Network
+   ```
+
+3. **Access the platform:**
+   - Users can access at `http://YOUR_IP` (no port number needed!)
+   - API docs at `http://YOUR_IP/docs`
+
 ### How It Works
 
 When you run `.\start.ps1`:
@@ -278,9 +295,6 @@ When you run `.\start.ps1`:
 - Real-time annotation synchronization via WebSockets
 - Collaborative editing with instant updates
 
-### Manual Setup
-
-If you prefer to start servers manually:
 ### Manual Setup
 
 If you prefer to start servers manually:
@@ -311,8 +325,6 @@ If you prefer to start servers manually:
 5. **Share your network URL:**
    - Share: `http://YOUR_IP:3000`
 
-See `NETWORK_QUICK_START.md` for detailed instructions.
-
 **Note:** Backend already listens on `0.0.0.0:8000` and CORS is configured for local network access.
 
 ## Configuration
@@ -323,6 +335,8 @@ See `NETWORK_QUICK_START.md` for detailed instructions.
 UPLOAD_DIR=./uploads
 API_V1_PREFIX=/api
 ```
+
+**Note:** The `uploads` directory is created automatically in `backend/uploads/` by the setup script.
 
 ### Frontend (vite.config.js)
 
