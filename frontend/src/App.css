@@ -25,6 +25,17 @@
   align-items: center;
 }
 
+.username-display {
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.username-display:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
 .dataset-name {
   background: rgba(255,255,255,0.2);
   padding: 0.5rem 1rem;

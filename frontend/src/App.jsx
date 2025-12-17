@@ -57,6 +57,20 @@ function App() {
     }
   }, [])
 
+  const handleUsernameChange = () => {
+    const newUsername = prompt('Enter your new username:', currentUser)
+    if (newUsername && newUsername.trim() && newUsername.trim() !== currentUser) {
+      const trimmedUsername = newUsername.trim()
+      localStorage.setItem('eeg_annotation_username', trimmedUsername)
+      setCurrentUser(trimmedUsername)
+      
+      // If there's a socket connection, we need to reconnect with the new username
+      if (socket) {
+        socket.close()
+      }
+    }
+  }
+
   const loadAnnotations = async (datasetId) => {
     try {
       console.log('Loading annotations for dataset:', datasetId)
@@ -197,7 +211,13 @@ function App() {
       <header className="app-header">
         <h1>🧠 EEG/MEG Annotation Platform</h1>
         <div className="user-info">
-          <span>👤 {currentUser || 'Loading...'}</span>
+          <span 
+            className="username-display" 
+            onClick={handleUsernameChange}
+            title="Click to change username"
+          >
+            👤 {currentUser || 'Loading...'}
+          </span>
           {connectedUsers.length > 1 && (
             <span style={{fontSize: '12px', color: '#666', marginLeft: '10px'}}>
               👥 {connectedUsers.length} users online
