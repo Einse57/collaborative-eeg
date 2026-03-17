@@ -89,6 +89,14 @@ class REVEPlugin(DetectionPlugin):
                 "step": 1,
                 "label": "Max windows (0 = unlimited)",
             },
+            "batch_size": {
+                "type": "number",
+                "default": 16,
+                "min": 1,
+                "max": 256,
+                "step": 1,
+                "label": "Batch size (windows per forward pass)",
+            },
         })
         return schema
 
@@ -154,6 +162,14 @@ class REVEPlugin(DetectionPlugin):
 
         sensitivity: float = float(kwargs.get("sensitivity", 1.5))
         max_windows: int = int(kwargs.get("max_windows", 0))
+        batch_size: int = int(kwargs.get("batch_size", 16))
+        progress_cb = kwargs.get("_progress_cb")  # optional callback(pct, msg)
+
+        def _report(pct, msg=""):
+            if progress_cb:
+                progress_cb(pct, msg)
+
+        _report(10, "Preprocessing signal…")
 
         # --- 1. Get data --------------------------------------------------
         picks = mne.pick_types(raw.info, meg=False, eeg=True, exclude="bads")
@@ -181,15 +197,39 @@ class REVEPlugin(DetectionPlugin):
             n_windows = min(n_windows, max_windows)
         windows = windows[:n_windows]
 
-        # --- 3. Compute embeddings ----------------------------------------
-        pos = self._make_positions(windows.shape[1], n_windows, self._device)
-        batch = _torch.from_numpy(windows).to(self._device)
+        # --- 3. Compute embeddings in batches -----------------------------
+        n_channels = windows.shape[1]
+        all_embeddings = []
+        n_batches = (n_windows + batch_size - 1) // batch_size
 
-        with _torch.no_grad():
-            feats = self._backbone(eeg=batch, pos=pos)
-            pooled = self._backbone.attention_pooling(feats)  # (B, E)
+        _report(15, f"Running inference — {n_windows} windows, {n_batches} batches")
+        print(f"  REVE: {n_windows} windows, batch_size={batch_size}, "
+              f"{n_batches} batches, device={self._device}")
 
-        embeddings = pooled.cpu().numpy()  # (n_windows, embed_dim)
+        for b_idx in range(n_batches):
+            start = b_idx * batch_size
+            end = min(start + batch_size, n_windows)
+            chunk = windows[start:end]
+            b = chunk.shape[0]
+
+            pos = self._make_positions(n_channels, b, self._device)
+            batch_tensor = _torch.from_numpy(chunk).to(self._device)
+
+            with _torch.no_grad():
+                feats = self._backbone(eeg=batch_tensor, pos=pos)
+                pooled = self._backbone.attention_pooling(feats)  # (b, E)
+
+            all_embeddings.append(pooled.cpu().numpy())
+
+            # Progress: 15% to 85% maps to batch progress
+            batch_pct = 15 + int(70 * (b_idx + 1) / n_batches)
+            _report(batch_pct, f"Inference batch {b_idx + 1}/{n_batches}")
+
+            if (b_idx + 1) % 10 == 0 or b_idx == n_batches - 1:
+                print(f"  REVE: batch {b_idx + 1}/{n_batches} "
+                      f"({(b_idx + 1) * 100 // n_batches}%)")
+
+        embeddings = np.concatenate(all_embeddings, axis=0)  # (n_windows, embed_dim)
 
         # --- 4. Anomaly scoring -------------------------------------------
         norms = np.linalg.norm(embeddings, axis=-1)  # (n_windows,)

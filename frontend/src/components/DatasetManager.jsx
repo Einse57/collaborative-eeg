@@ -40,6 +40,8 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
   const [detectionMethod, setDetectionMethod] = useState(null)
   const [detectionPlugins, setDetectionPlugins] = useState([])
   const [pluginsLoading, setPluginsLoading] = useState(true)
+  const [detectionProgress, setDetectionProgress] = useState(0)
+  const [detectionMessage, setDetectionMessage] = useState('')
   const stallTimerRef = useRef(null)
   const abortControllerRef = useRef(null)
 
@@ -174,9 +176,12 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
 
     setDetectingEvents(true)
     setDetectionMethod(pluginId)
-    
+    setDetectionProgress(0)
+    setDetectionMessage('Starting…')
+
     try {
-      const response = await axios.post(
+      // 1. Start the job
+      const startResp = await axios.post(
         `${API_URL}/api/detection/${selectedDataset.id}/detect`,
         {
           plugin_id: pluginId,
@@ -184,13 +189,26 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
           threshold: 0.5
         }
       )
-      
-      const { data } = response
-      alert(`${data.message}\n\nPlugin: ${data.plugin_name}\nDetections: ${data.detections.length}`)
-      
-      // Reload annotations to show detected events
-      if (onAnnotationsRefresh) {
-        onAnnotationsRefresh()
+      const jobId = startResp.data.job_id
+
+      // 2. Poll until done
+      const POLL_MS = 1500
+      while (true) {
+        await new Promise(r => setTimeout(r, POLL_MS))
+        const poll = await axios.get(`${API_URL}/api/detection/jobs/${jobId}`)
+        const job = poll.data
+        setDetectionProgress(Math.round(job.progress))
+        setDetectionMessage(job.message)
+
+        if (job.status === 'completed') {
+          alert(`${job.message}\n\nPlugin: ${job.plugin_name}\nDetections: ${job.detections.length}`)
+          if (onAnnotationsRefresh) onAnnotationsRefresh()
+          break
+        }
+        if (job.status === 'failed') {
+          alert(`Detection failed: ${job.error || job.message}`)
+          break
+        }
       }
     } catch (error) {
       const errorMsg = error.response?.data?.detail || error.message
@@ -198,6 +216,8 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
     } finally {
       setDetectingEvents(false)
       setDetectionMethod(null)
+      setDetectionProgress(0)
+      setDetectionMessage('')
     }
   }
 
@@ -301,7 +321,7 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
                   title={plugin.description}
                 >
                   {detectingEvents && detectionMethod === plugin.id 
-                    ? '⏳ Detecting...' 
+                    ? `⏳ ${detectionProgress}% — ${detectionMessage}`
                     : `${plugin.icon} ${plugin.name}`}
                 </button>
               ))}
