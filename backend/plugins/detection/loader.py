@@ -29,6 +29,14 @@ def load_plugins():
     except Exception as e:
         print(f"⚠ Could not load CNN plugin: {e}")
     
+    # Try to load REVE-Large foundation model plugin
+    try:
+        from .reve_plugin import REVEPlugin
+        reve_plugin = REVEPlugin()
+        plugin_registry.register(reve_plugin)
+    except Exception as e:
+        print(f"⚠ Could not load REVE plugin: {e}")
+    
     # Future plugins can be added here, or discovered dynamically
     # from a plugins directory
     

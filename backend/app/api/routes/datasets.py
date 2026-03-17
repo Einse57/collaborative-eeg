@@ -23,10 +23,19 @@ datasets_db = {}
 async def upload_dataset(file: UploadFile = File(...)):
     """Upload a neurophysiological data file"""
     try:
+        # Enforce max upload size
+        contents = await file.read()
+        if len(contents) > settings.MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large ({len(contents) / (1024**3):.1f} GB). Maximum allowed: {settings.MAX_UPLOAD_SIZE / (1024**3):.0f} GB"
+            )
+
         # Save uploaded file
         file_path = Path(settings.UPLOAD_DIR) / file.filename
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(contents)
+        del contents  # free memory before loading into MNE
         
         # Load with MNE
         raw, dataset_id = mne_service.load_file(str(file_path))
