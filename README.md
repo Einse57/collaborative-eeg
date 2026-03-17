@@ -8,7 +8,7 @@ This platform provides a web interface for annotating EEG/MEG recordings with re
 
 ### Key Features
 
-- Load and visualize neurophysiological data (.fif, .edf, .bdf, .set, .vhdr)
+- Load and visualize neurophysiological data (.fif, .edf, .bdf, .set, .vhdr, .mat, .h5)
 - Interactive canvas-based signal viewer with time/amplitude controls
 - Drag-to-create annotations with live preview
 - Custom annotation type definitions
@@ -414,6 +414,20 @@ Built with MNE-Python (https://mne.tools/)
 - `.bdf` - BioSemi Data Format
 - `.set` - EEGLAB format
 - `.vhdr` - BrainVision format
+- `.mat` - MATLAB (v5/v7 and v7.3/HDF5) — auto-detects EEG data array, sampling rate, and seizure annotations from a companion `*_info.mat` file if present
+- `.h5` - HDF5 / NeuroTec format — reads `data/ieeg` or the largest 2-D dataset
+
+**Example datasets:**
+
+| Format | Source | Link |
+|--------|--------|------|
+| `.mat` | SWEZ-ETHZ Long-Term iEEG | http://ieeg-swez.ethz.ch/long-term_dataset/ |
+| `.h5` | NeuroTec SWEC-iEEG (HDF5, AI-ready) | https://huggingface.co/datasets/NeuroTec/SWEC_iEEG_Dataset/tree/main |
+| `.edf` | PhysioNet CHB-MIT Scalp EEG | https://physionet.org/content/chbmit/1.0.0/ |
+| `.edf` | PhysioNet EEG Motor Movement/Imagery | https://physionet.org/content/eegmmidb/1.0.0/ |
+| `.fif` | MNE Sample Data (built-in download) | https://mne.tools/stable/documentation/datasets.html |
+| `.bdf` | BioSemi example files | https://www.biosemi.com/download.htm |
+| `.set` | EEGLAB sample datasets | https://sccn.ucsd.edu/eeglab/downloaddata.php |
 
 **Important:** Not all `.fif` files contain raw data. Files like:
 - `*-cov.fif` (covariance matrices)
