@@ -22,12 +22,19 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# IDE
+# IDE / Editor
 .vscode/
 .idea/
+*.code-workspace
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+*.iml
 
 # OS
 .DS_Store
@@ -49,9 +56,11 @@ eeg_annotations.db
 *.edf
 *.bdf
 
-# Detection plugins (examples - customize per deployment)
-backend/plugins/detection/rf_plugin.py
-backend/plugins/detection/cnn_plugin.py
+# Detection plugins — exclude everything under plugins/ except infrastructure.
+# Plugin subdirectories (and their checkpoints) are deployment-specific.
+backend/plugins/*/
+!backend/plugins/_shared/
+!backend/plugins/_example/
 
 # Environment and secrets
 .env

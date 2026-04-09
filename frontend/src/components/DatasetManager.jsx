@@ -1,16 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import axios from 'axios'
 import './DatasetManager.css'
-
-const FILE_SIZE_WARNING_MB = 100
-const STALL_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes with no progress = stall
-
-function formatBytes(bytes) {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
-}
 
 // API URL detection:
 // - If accessed through nginx (port 80 or 443), use relative paths
@@ -31,19 +21,12 @@ const API_URL = getApiUrl();
 
 function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSuccess, onLoadDatasets, onAnnotationsRefresh }) {
   const [uploading, setUploading] = useState(false)
-  const [uploadPhase, setUploadPhase] = useState(null) // 'uploading' | 'processing'
-  const [uploadProgress, setUploadProgress] = useState(0) // 0-100
-  const [uploadedBytes, setUploadedBytes] = useState(0)
-  const [totalBytes, setTotalBytes] = useState(0)
   const [loadingSample, setLoadingSample] = useState(false)
   const [detectingEvents, setDetectingEvents] = useState(false)
   const [detectionMethod, setDetectionMethod] = useState(null)
   const [detectionPlugins, setDetectionPlugins] = useState([])
   const [pluginsLoading, setPluginsLoading] = useState(true)
-  const [detectionProgress, setDetectionProgress] = useState(0)
-  const [detectionMessage, setDetectionMessage] = useState('')
-  const stallTimerRef = useRef(null)
-  const abortControllerRef = useRef(null)
+  const [detectionProgress, setDetectionProgress] = useState({ pct: 0, message: '' })
 
   // Load available detection plugins on mount
   useEffect(() => {
@@ -67,91 +50,24 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
     }
   }
 
-  const resetUploadState = useCallback(() => {
-    setUploading(false)
-    setUploadPhase(null)
-    setUploadProgress(0)
-    setUploadedBytes(0)
-    setTotalBytes(0)
-    if (stallTimerRef.current) {
-      clearTimeout(stallTimerRef.current)
-      stallTimerRef.current = null
-    }
-    abortControllerRef.current = null
-  }, [])
-
-  const resetStallTimer = useCallback(() => {
-    if (stallTimerRef.current) clearTimeout(stallTimerRef.current)
-    stallTimerRef.current = setTimeout(() => {
-      // No progress for 10 minutes — abort
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-      }
-      resetUploadState()
-      alert('Upload stalled — no progress for 10 minutes. Please check your connection and try again.')
-    }, STALL_TIMEOUT_MS)
-  }, [resetUploadState])
-
   const handleFileUpload = async (event) => {
     const file = event.target.files[0]
     if (!file) return
 
-    // Size warning
-    const sizeMB = file.size / (1024 * 1024)
-    if (sizeMB > FILE_SIZE_WARNING_MB) {
-      const proceed = confirm(
-        `This file is ${formatBytes(file.size)}. ` +
-        `Upload and processing may take a while.\n\nContinue?`
-      )
-      if (!proceed) {
-        event.target.value = ''
-        return
-      }
-    }
-
     const formData = new FormData()
     formData.append('file', file)
 
-    const controller = new AbortController()
-    abortControllerRef.current = controller
-
     setUploading(true)
-    setUploadPhase('uploading')
-    setUploadProgress(0)
-    setUploadedBytes(0)
-    setTotalBytes(file.size)
-    resetStallTimer()
-
     try {
       await axios.post(`${API_URL}/api/datasets/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        signal: controller.signal,
-        onUploadProgress: (progressEvent) => {
-          // Reset stall timer on every progress tick
-          resetStallTimer()
-          const loaded = progressEvent.loaded || 0
-          const total = progressEvent.total || file.size
-          const pct = Math.round((loaded / total) * 100)
-          setUploadedBytes(loaded)
-          setTotalBytes(total)
-          setUploadProgress(pct)
-          // When upload finishes, switch to processing phase
-          if (pct >= 100) {
-            setUploadPhase('processing')
-          }
-        }
+        headers: { 'Content-Type': 'multipart/form-data' }
       })
+      // No alert - dataset will appear in the list visually
       onUploadSuccess()
     } catch (error) {
-      if (axios.isCancel(error) || error.name === 'CanceledError') {
-        // Stall-timeout abort — already alerted
-      } else {
-        const msg = error.response?.data?.detail || error.message
-        alert('Error uploading dataset: ' + msg)
-      }
+      alert('Error uploading dataset: ' + error.message)
     } finally {
-      resetUploadState()
-      event.target.value = ''
+      setUploading(false)
     }
   }
 
@@ -176,12 +92,10 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
 
     setDetectingEvents(true)
     setDetectionMethod(pluginId)
-    setDetectionProgress(0)
-    setDetectionMessage('Starting…')
-
+    
     try {
-      // 1. Start the job
-      const startResp = await axios.post(
+      // Start the detection job
+      const startResponse = await axios.post(
         `${API_URL}/api/detection/${selectedDataset.id}/detect`,
         {
           plugin_id: pluginId,
@@ -189,26 +103,33 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
           threshold: 0.5
         }
       )
-      const jobId = startResp.data.job_id
+      
+      const jobId = startResponse.data.job_id
 
-      // 2. Poll until done
-      const POLL_MS = 1500
+      // Poll until the job completes or fails
+      let result = null
+      setDetectionProgress({ pct: 0, message: 'Starting…' })
       while (true) {
-        await new Promise(r => setTimeout(r, POLL_MS))
-        const poll = await axios.get(`${API_URL}/api/detection/jobs/${jobId}`)
-        const job = poll.data
-        setDetectionProgress(Math.round(job.progress))
-        setDetectionMessage(job.message)
+        await new Promise(r => setTimeout(r, 1000))
+        const pollResponse = await axios.get(`${API_URL}/api/detection/jobs/${jobId}`)
+        const job = pollResponse.data
+
+        setDetectionProgress({ pct: Math.round(job.progress || 0), message: job.message || '' })
 
         if (job.status === 'completed') {
-          alert(`${job.message}\n\nPlugin: ${job.plugin_name}\nDetections: ${job.detections.length}`)
-          if (onAnnotationsRefresh) onAnnotationsRefresh()
+          result = job
           break
         }
         if (job.status === 'failed') {
-          alert(`Detection failed: ${job.error || job.message}`)
-          break
+          throw new Error(job.error || job.message || 'Detection failed')
         }
+      }
+
+      alert(`${result.message}\n\nPlugin: ${result.plugin_name}\nDetections: ${result.detections.length}`)
+      
+      // Reload annotations to show detected events
+      if (onAnnotationsRefresh) {
+        onAnnotationsRefresh()
       }
     } catch (error) {
       const errorMsg = error.response?.data?.detail || error.message
@@ -216,8 +137,7 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
     } finally {
       setDetectingEvents(false)
       setDetectionMethod(null)
-      setDetectionProgress(0)
-      setDetectionMessage('')
+      setDetectionProgress({ pct: 0, message: '' })
     }
   }
 
@@ -249,37 +169,16 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
       
       <div className="upload-section">
         <label htmlFor="file-upload" className="upload-btn primary-btn">
-          {uploading ? (
-            uploadPhase === 'processing'
-              ? '⏳ Processing...'
-              : `⏳ Uploading... ${uploadProgress}%`
-          ) : '📤 Upload File'}
+          {uploading ? '⏳ Uploading...' : '📤 Upload File'}
         </label>
         <input
           id="file-upload"
           type="file"
-          accept=".fif,.edf,.bdf,.set,.vhdr,.h5,.mat"
+          accept=".fif,.edf,.bdf,.set,.vhdr,.mat"
           onChange={handleFileUpload}
           disabled={uploading}
           style={{ display: 'none' }}
         />
-        {uploading && (
-          <div className="upload-progress-area">
-            <div className="upload-progress-bar">
-              <div
-                className={`upload-progress-fill ${uploadPhase === 'processing' ? 'processing' : ''}`}
-                style={{ width: `${uploadPhase === 'processing' ? 100 : uploadProgress}%` }}
-              />
-            </div>
-            <div className="upload-progress-text">
-              {uploadPhase === 'processing' ? (
-                'Upload complete — loading dataset on server…'
-              ) : (
-                `${formatBytes(uploadedBytes)} / ${formatBytes(totalBytes)}`
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="sample-section">
@@ -321,12 +220,17 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
                   title={plugin.description}
                 >
                   {detectingEvents && detectionMethod === plugin.id 
-                    ? `⏳ ${detectionProgress}% — ${detectionMessage}`
+                    ? `⏳ ${detectionProgress.pct}%` 
                     : `${plugin.icon} ${plugin.name}`}
                 </button>
               ))}
             </div>
-            {!selectedDataset && (
+            {detectingEvents && detectionProgress.message && (
+              <p className="hint-message" style={{color: '#1976d2', fontSize: '0.75rem'}}>
+                {detectionProgress.message}
+              </p>
+            )}
+            {!selectedDataset && !detectingEvents && (
               <p className="hint-message">Select a dataset above to enable detection</p>
             )}
           </>

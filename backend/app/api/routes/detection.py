@@ -17,8 +17,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ...services.mne_service import mne_service
-from plugins.detection import plugin_registry
-from plugins.detection.loader import load_plugins
+from plugins import plugin_registry
+from plugins.loader import load_plugins
 
 router = APIRouter()
 
@@ -63,7 +63,7 @@ _jobs_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 
 class DetectionRequest(BaseModel):
-    plugin_id: str  # e.g., 'rf', 'cnn', 'reve'
+    plugin_id: str  # e.g., 'rf', 'cnn_cbam', 'reve', 'distilled_reve_single'
     segment_duration: float = 2.0
     threshold: float = 0.5
     config: Optional[Dict[str, Any]] = None  # Plugin-specific config

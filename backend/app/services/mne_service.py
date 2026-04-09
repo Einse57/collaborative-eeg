@@ -7,208 +7,31 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import json
 
-# HDF5 support for .mat (MATLAB v7.3) and .h5 files
-try:
-    import h5py
-    try:
-        import hdf5plugin  # noqa: F401 – registers extra compression codecs
-    except Exception:
-        pass
-    HAS_H5PY = True
-except ImportError:
-    HAS_H5PY = False
+
+# ── .mat helpers (SWEC-ETHZ iEEG format) ──────────────────────────────────
+
+_EEG_KEYS = ["EEG", "eeg", "data", "ieeg", "raw", "X", "x"]
+_SFREQ_KEYS = ["fs", "Fs", "sfreq", "sampling_rate", "SamplingRate", "srate"]
 
 
-# ----- HDF5 / MAT helpers -------------------------------------------------- #
+def _load_mat_as_raw(file_path: str) -> mne.io.RawArray:
+    """Load a SWEC-ETHZ style .mat file as an MNE RawArray.
 
-_IEEG_KEY_CANDIDATES = ["data/ieeg", "data", "ieeg", "EEG", "eeg", "raw"]
-_SFREQ_CANDIDATES = ("sfreq", "sampling_rate", "fs", "Fs", "SamplingRate")
-_SEIZURE_KEY_CANDIDATES = ["data/seizures", "seizures", "events"]
-
-
-def _h5_find_2d_dataset(f: "h5py.File") -> Optional[str]:
-    """Walk the file and return the key of the first large 2-D dataset."""
-    for key in _IEEG_KEY_CANDIDATES:
-        if key in f and hasattr(f[key], "shape") and f[key].ndim == 2:
-            return key
-    # Fallback: pick the largest 2-D dataset
-    best_key, best_size = None, 0
-    def _visit(name, obj):
-        nonlocal best_key, best_size
-        if isinstance(obj, h5py.Dataset) and obj.ndim == 2:
-            sz = obj.shape[0] * obj.shape[1]
-            if sz > best_size:
-                best_key, best_size = name, sz
-    f.visititems(_visit)
-    return best_key
-
-
-def _h5_try_read_sfreq(f: "h5py.File") -> Optional[float]:
-    """Try to infer sampling frequency from attributes or root datasets."""
-    for k in _SFREQ_CANDIDATES:
-        if k in f.attrs:
-            try:
-                return float(np.asarray(f.attrs[k]).squeeze())
-            except Exception:
-                pass
-        if k in f:
-            try:
-                return float(np.asarray(f[k][()]).squeeze())
-            except Exception:
-                continue
-    return None
-
-
-def _h5_try_read_seizures(f: "h5py.File", sfreq: float) -> List[Tuple[float, float]]:
-    """Try to read seizure intervals as [(onset_sec, offset_sec), ...]."""
-    for key in _SEIZURE_KEY_CANDIDATES:
-        if key not in f:
-            continue
-        try:
-            arr = np.asarray(f[key][()])
-        except Exception:
-            continue
-        if arr.size == 0:
-            return []
-        # Structured array with onsets/offsets fields
-        if arr.dtype.fields and "onsets" in arr.dtype.fields and "offsets" in arr.dtype.fields:
-            on = np.asarray(arr["onsets"]).reshape(-1)
-            off = np.asarray(arr["offsets"]).reshape(-1)
-            return [(float(o), float(f_)) for o, f_ in zip(on, off)]
-        # Plain Nx2 numeric
-        if arr.ndim == 2 and arr.shape[1] >= 2:
-            return [(float(r[0]), float(r[1])) for r in arr]
-    return []
-
-
-def _h5_try_read_channel_names(f: "h5py.File", n_channels: int) -> List[str]:
-    """Try to read channel labels; fall back to generic names."""
-    for key in ("channel_names", "channels", "ch_names", "labels"):
-        if key in f:
-            try:
-                names = [x.decode() if isinstance(x, bytes) else str(x) for x in f[key][()]]
-                if len(names) == n_channels:
-                    return names
-            except Exception:
-                pass
-        if key in f.attrs:
-            try:
-                names = [x.decode() if isinstance(x, bytes) else str(x) for x in f.attrs[key]]
-                if len(names) == n_channels:
-                    return names
-            except Exception:
-                pass
-    return [f"CH{i}" for i in range(n_channels)]
-
-
-def _is_hdf5(file_path: str) -> bool:
-    """Check the file's magic bytes to see if it is HDF5."""
-    try:
-        with open(file_path, "rb") as fh:
-            return fh.read(8)[:4] == b"\x89HDF"
-    except Exception:
-        return False
-
-
-_MAT_EEG_KEY_CANDIDATES = ["EEG", "eeg", "data", "ieeg", "raw", "X", "x"]
-_MAT_SFREQ_CANDIDATES = ["fs", "Fs", "sfreq", "sampling_rate", "SamplingRate", "srate"]
-
-
-def _find_mat_info_file(data_file_path: str) -> Optional[str]:
-    """Look for a companion *_info.mat file in the same directory.
-
-    Convention: data file ``ID01_100h.mat`` → info file ``ID01_info.mat``.
-    The patient prefix is everything before the first underscore-digit segment.
+    Searches for common key names for the EEG data array and sampling
+    frequency.  Falls back to the largest 2-D array and 512 Hz if the
+    expected keys are not found.
     """
-    import re
-    p = Path(data_file_path)
-    directory = p.parent
-    stem = p.stem  # e.g. "ID01_100h"
-
-    # Extract patient prefix (e.g. "ID01" from "ID01_100h")
-    m = re.match(r"^([A-Za-z]+\d+)", stem)
-    if m:
-        prefix = m.group(1)
-        candidate = directory / f"{prefix}_info.mat"
-        if candidate.exists():
-            return str(candidate)
-
-    # Fallback: look for any *_info.mat in the same directory
-    for f in directory.glob("*_info.mat"):
-        return str(f)
-    return None
-
-
-def _load_mat_info(info_path: str) -> dict:
-    """Parse a companion *_info.mat and return sfreq + seizure intervals."""
-    from scipy.io import loadmat
-    mat = loadmat(info_path)
-    result: dict = {}
-
-    # Sampling rate
-    for key in _MAT_SFREQ_CANDIDATES:
-        if key in mat:
-            try:
-                result["sfreq"] = float(np.asarray(mat[key]).squeeze())
-                break
-            except Exception:
-                pass
-
-    # Seizure begin/end (in samples) — convert to seconds if sfreq available
-    sb_key = next((k for k in ("seizure_begin", "seizure_start", "Seizure_begin") if k in mat), None)
-    se_key = next((k for k in ("seizure_end", "seizure_stop", "Seizure_end") if k in mat), None)
-    if sb_key and se_key:
-        sfreq = result.get("sfreq", 1.0)
-        begins = np.asarray(mat[sb_key], dtype=float).flatten()
-        ends = np.asarray(mat[se_key], dtype=float).flatten()
-        seizures = []
-        for b, e in zip(begins, ends):
-            onset_sec = b / sfreq
-            offset_sec = e / sfreq
-            seizures.append((onset_sec, offset_sec))
-        result["seizures"] = seizures
-
-    # Channel names (if present in the info file)
-    for key in ("ch_names", "channels", "labels", "channel_names"):
-        if key in mat:
-            try:
-                raw_names = mat[key]
-                if raw_names.ndim == 2:
-                    raw_names = raw_names.flatten()
-                names = [str(x).strip() if not isinstance(x, np.ndarray)
-                         else str(x.flat[0]).strip() for x in raw_names]
-                result["ch_names"] = names
-                break
-            except Exception:
-                pass
-
-    return result
-
-
-def _load_mat_v5_as_raw(file_path: str) -> mne.io.RawArray:
-    """Load a MATLAB v5/v7 .mat file (non-HDF5) and return an MNE RawArray."""
     from scipy.io import loadmat
 
     mat = loadmat(file_path)
 
-    # --- companion info file (e.g. ID01_info.mat) ---
-    info_data: dict = {}
-    info_path = _find_mat_info_file(file_path)
-    if info_path:
-        try:
-            info_data = _load_mat_info(info_path)
-            print(f"✓ Loaded companion info file: {info_path}")
-        except Exception as e:
-            print(f"⚠ Could not parse info file {info_path}: {e}")
-
-    # --- find EEG data array ---
+    # --- Find EEG data array ---
     data = None
-    for key in _MAT_EEG_KEY_CANDIDATES:
+    for key in _EEG_KEYS:
         if key in mat and isinstance(mat[key], np.ndarray) and mat[key].ndim == 2:
             data = mat[key]
             break
     if data is None:
-        # Fallback: largest 2-D array in the file
         best_key, best_size = None, 0
         for k, v in mat.items():
             if k.startswith("__"):
@@ -220,160 +43,140 @@ def _load_mat_v5_as_raw(file_path: str) -> mne.io.RawArray:
         if best_key is not None:
             data = mat[best_key]
     if data is None:
-        raise ValueError(
-            f"Could not find a 2-D EEG array in {file_path}. "
-            f"Tried keys: {_MAT_EEG_KEY_CANDIDATES}"
-        )
+        raise ValueError(f"No 2-D EEG array found in {file_path}")
 
     data = np.asarray(data, dtype=np.float64)
 
-    # Heuristic: if dim-0 >> dim-1 the data is likely (samples, channels)
+    # Expect (channels, samples) — transpose if rows >> cols
     if data.shape[0] > data.shape[1] * 4:
         data = data.T
 
-    n_channels = data.shape[0]
-
-    # --- sampling frequency (prefer info file, then data file, then default) ---
-    sfreq = info_data.get("sfreq")
-    if sfreq is None:
-        for key in _MAT_SFREQ_CANDIDATES:
-            if key in mat:
-                try:
-                    sfreq = float(np.asarray(mat[key]).squeeze())
-                    break
-                except Exception:
-                    pass
+    # --- Sampling frequency ---
+    sfreq = None
+    for key in _SFREQ_KEYS:
+        if key in mat:
+            try:
+                sfreq = float(np.asarray(mat[key]).squeeze())
+                break
+            except Exception:
+                pass
     if sfreq is None:
         sfreq = 512.0
-        print(f"⚠ Could not detect sampling rate in {file_path}; defaulting to {sfreq} Hz")
 
-    # --- channel names (prefer info file, then data file, then generic) ---
-    ch_names = None
-    if "ch_names" in info_data and len(info_data["ch_names"]) == n_channels:
-        ch_names = info_data["ch_names"]
-    if ch_names is None:
-        for key in ("ch_names", "channels", "labels", "channel_names"):
-            if key in mat:
-                try:
-                    raw_names = mat[key]
-                    if raw_names.ndim == 2:
-                        # MATLAB cell arrays come in as (1, N) or (N, 1) object arrays
-                        raw_names = raw_names.flatten()
-                    names = [str(x).strip() if not isinstance(x, np.ndarray)
-                             else str(x.flat[0]).strip() for x in raw_names]
-                    if len(names) == n_channels:
-                        ch_names = names
-                        break
-                except Exception:
-                    pass
-    if ch_names is None:
-        ch_names = [f"CH{i}" for i in range(n_channels)]
+    # --- Build MNE RawArray ---
+    n_channels = data.shape[0]
+    ch_names = [f"iEEG{i:03d}" for i in range(n_channels)]
+    ch_types = ["eeg"] * n_channels
+    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
 
-    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
+    # Embed seizure annotations from companion *_info.mat if present
+    info_path = _find_companion_info(file_path)
     raw = mne.io.RawArray(data, info)
 
-    # --- seizure annotations (prefer info file, then inline) ---
-    seizures_applied = False
-    if "seizures" in info_data and info_data["seizures"]:
+    # First try inline seizure keys (demo/trimmed files embed them)
+    annots = _annotations_from_inline(mat, n_samples=data.shape[1], sfreq=sfreq)
+    if len(annots) == 0 and info_path is not None:
+        annots = _load_seizure_annotations(info_path, file_path, sfreq,
+                                           n_samples=data.shape[1])
+    if len(annots) > 0:
+        raw.set_annotations(annots)
+
+    return raw
+
+
+def _find_companion_info(mat_path: str) -> Optional[str]:
+    """Look for <PatientID>_info.mat beside or in same directory tree."""
+    p = Path(mat_path)
+    stem = p.stem  # e.g. "ID03_89h"
+    patient_id = stem.split("_")[0]  # "ID03"
+
+    # Check same directory
+    info = p.parent / f"{patient_id}_info.mat"
+    if info.is_file():
+        return str(info)
+
+    # Check for demo companion (<stem>_info.mat)
+    info = p.parent / f"{stem}_info.mat"
+    if info.is_file():
+        return str(info)
+
+    # Check parent directory (datasets/ may have flat layout)
+    info = p.parent.parent / patient_id / f"{patient_id}_info.mat"
+    if info.is_file():
+        return str(info)
+
+    return None
+
+
+def _annotations_from_inline(mat: dict, n_samples: int, sfreq: float) -> mne.Annotations:
+    """Extract seizure annotations stored directly in the .mat file."""
+    sb_key = next((k for k in ("seizure_begin", "seizure_start") if k in mat), None)
+    se_key = next((k for k in ("seizure_end", "seizure_stop") if k in mat), None)
+    if sb_key is None or se_key is None:
+        return mne.Annotations(onset=[], duration=[], description=[])
+
+    begins = np.asarray(mat[sb_key], dtype=float).flatten()
+    ends = np.asarray(mat[se_key], dtype=float).flatten()
+    file_duration = n_samples / sfreq
+
+    onsets, durations, descriptions = [], [], []
+    for b, e in zip(begins, ends):
+        if b < 0 or b >= file_duration:
+            continue
+        e = min(e, file_duration)
+        onsets.append(float(b))
+        durations.append(float(e - b))
+        descriptions.append("Seizure")
+
+    return mne.Annotations(onset=onsets, duration=durations, description=descriptions)
+
+
+def _load_seizure_annotations(
+    info_path: str,
+    mat_path: str,
+    sfreq: float,
+    n_samples: int,
+) -> mne.Annotations:
+    """Extract seizure onset/offset from *_info.mat and map them to this file's time range."""
+    from scipy.io import loadmat
+
+    mat = loadmat(info_path)
+    sb_key = next((k for k in ("seizure_begin", "seizure_start", "Seizure_begin") if k in mat), None)
+    se_key = next((k for k in ("seizure_end", "seizure_stop", "Seizure_end") if k in mat), None)
+    if sb_key is None or se_key is None:
+        return mne.Annotations(onset=[], duration=[], description=[])
+
+    begins = np.asarray(mat[sb_key], dtype=float).flatten()
+    ends = np.asarray(mat[se_key], dtype=float).flatten()
+
+    # Determine this file's absolute time range
+    # Convention: <ID>_<H>h.mat covers [H*3600, (H+1)*3600) seconds
+    stem = Path(mat_path).stem
+    parts = stem.split("_")
+    hour_part = [p for p in parts if p.endswith("h")]
+    if hour_part:
         try:
-            szs = info_data["seizures"]
-            onsets = [s[0] for s in szs]
-            durations = [s[1] - s[0] for s in szs]
-            raw.set_annotations(mne.Annotations(
-                onset=onsets,
-                duration=durations,
-                description=["Seizure"] * len(onsets),
-            ))
-            seizures_applied = True
-            print(f"✓ Applied {len(szs)} seizure annotation(s) from info file")
-        except Exception as e:
-            print(f"⚠ Could not apply seizures from info file: {e}")
-
-    if not seizures_applied:
-        for key in ("seizures", "events", "Seizures", "Events"):
-            if key in mat:
-                try:
-                    arr = np.asarray(mat[key])
-                    if arr.ndim == 2 and arr.shape[1] >= 2:
-                        onsets = arr[:, 0].astype(float).tolist()
-                        durations = (arr[:, 1] - arr[:, 0]).astype(float).tolist()
-                        raw.set_annotations(mne.Annotations(
-                            onset=onsets,
-                            duration=durations,
-                            description=["Seizure"] * len(onsets),
-                        ))
-                        break
-                except Exception:
-                    pass
-
-    return raw
-
-
-def _load_h5_as_raw(file_path: str) -> mne.io.RawArray:
-    """Load an HDF5 / MATLAB-v7.3 file and return an MNE RawArray."""
-    if not HAS_H5PY:
-        raise RuntimeError(
-            "h5py is required to load .h5 / .mat files. "
-            "Install it with: pip install h5py hdf5plugin"
-        )
-
-    with h5py.File(file_path, "r") as f:
-        data_key = _h5_find_2d_dataset(f)
-        if data_key is None:
-            raise ValueError(
-                f"Could not find a 2-D EEG dataset in {file_path}. "
-                f"Tried keys: {_IEEG_KEY_CANDIDATES}"
-            )
-
-        dset = f[data_key]
-        shape = dset.shape  # expect (channels, samples) or (samples, channels)
-
-        # Heuristic: if dim-0 >> dim-1 the data is likely (samples, channels)
-        if shape[0] > shape[1] * 4:
-            data = np.asarray(dset[()], dtype=np.float64).T  # transpose to (ch, samp)
-        else:
-            data = np.asarray(dset[()], dtype=np.float64)
-
-        n_channels = data.shape[0]
-
-        sfreq = _h5_try_read_sfreq(f)
-        if sfreq is None:
-            sfreq = 512.0  # sensible default for iEEG
-            print(f"⚠ Could not detect sampling rate in {file_path}; defaulting to {sfreq} Hz")
-
-        ch_names = _h5_try_read_channel_names(f, n_channels)
-        seizures = _h5_try_read_seizures(f, sfreq)
-
-    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
-    raw = mne.io.RawArray(data, info)
-
-    # Convert seizure intervals to MNE Annotations
-    if seizures:
-        onsets = [s[0] for s in seizures]
-        durations = [s[1] - s[0] for s in seizures]
-        descriptions = ["Seizure"] * len(seizures)
-        raw.set_annotations(mne.Annotations(onset=onsets, duration=durations, description=descriptions))
-
-    return raw
-
-
-def _load_mat_or_h5_as_raw(file_path: str) -> mne.io.RawArray:
-    """Load a .mat or .h5 file, auto-detecting the format."""
-    file_ext = Path(file_path).suffix.lower()
-
-    # .h5 files are always HDF5
-    if file_ext == ".h5":
-        return _load_h5_as_raw(file_path)
-
-    # .mat files can be v5/v7 (scipy) or v7.3 (HDF5) — check magic bytes
-    if _is_hdf5(file_path):
-        return _load_h5_as_raw(file_path)
+            hour_idx = int(hour_part[0].rstrip("h"))
+        except ValueError:
+            return mne.Annotations(onset=[], duration=[], description=[])
     else:
-        return _load_mat_v5_as_raw(file_path)
+        return mne.Annotations(onset=[], duration=[], description=[])
 
+    file_start_s = hour_idx * 3600
+    file_end_s = file_start_s + n_samples / sfreq
 
-# --------------------------------------------------------------------------- #
+    onsets, durations, descriptions = [], [], []
+    for b, e in zip(begins, ends):
+        if e <= file_start_s or b >= file_end_s:
+            continue
+        # Clip to file boundaries
+        local_start = max(b - file_start_s, 0.0)
+        local_end = min(e - file_start_s, file_end_s - file_start_s)
+        onsets.append(local_start)
+        durations.append(local_end - local_start)
+        descriptions.append("Seizure")
 
+    return mne.Annotations(onset=onsets, duration=durations, description=descriptions)
 
 class MNEService:
     """Service for MNE-Python operations"""
@@ -386,6 +189,14 @@ class MNEService:
         """Load a neurophysiological data file"""
         file_ext = Path(file_path).suffix.lower()
         
+        # .mat files need special handling (not an MNE built-in format)
+        if file_ext == '.mat':
+            raw = _load_mat_as_raw(file_path)
+            dataset_id = Path(file_path).stem
+            self.loaded_datasets[dataset_id] = raw
+            self.dataset_file_paths[dataset_id] = file_path
+            return raw, dataset_id
+
         loaders = {
             '.fif': mne.io.read_raw_fif,
             '.edf': mne.io.read_raw_edf,
@@ -393,14 +204,6 @@ class MNEService:
             '.set': mne.io.read_raw_eeglab,
             '.vhdr': mne.io.read_raw_brainvision,
         }
-        
-        # HDF5-based formats (.h5) and MATLAB formats (.mat v5/v7/v7.3)
-        if file_ext in ('.h5', '.mat'):
-            raw = _load_mat_or_h5_as_raw(file_path)
-            dataset_id = Path(file_path).stem
-            self.loaded_datasets[dataset_id] = raw
-            self.dataset_file_paths[dataset_id] = file_path
-            return raw, dataset_id
         
         loader = loaders.get(file_ext)
         if not loader:
