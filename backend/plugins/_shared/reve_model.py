@@ -31,7 +31,14 @@ def load_reve_large_backbone(
 
     backbone = AutoModel.from_pretrained(model_id, trust_remote_code=True)
 
-    resolved_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    if device:
+        resolved_device = device
+    elif torch.cuda.is_available():
+        resolved_device = "cuda"
+    elif hasattr(torch, "xpu") and torch.xpu.is_available():
+        resolved_device = "xpu"
+    else:
+        resolved_device = "cpu"
     backbone.to(resolved_device)
     backbone.eval()
 

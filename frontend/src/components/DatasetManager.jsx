@@ -28,27 +28,36 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
   const [pluginsLoading, setPluginsLoading] = useState(true)
   const [detectionProgress, setDetectionProgress] = useState({ pct: 0, message: '' })
 
-  // Load available detection plugins on mount
+  // Load available detection plugins on mount (retry if backend not ready yet)
   useEffect(() => {
-    loadDetectionPlugins()
-  }, [])
-
-  const loadDetectionPlugins = async () => {
-    try {
-      console.log('Loading detection plugins from:', `${API_URL}/api/detection/plugins`)
-      const response = await axios.get(`${API_URL}/api/detection/plugins`)
-      console.log('Plugins response:', response.data)
-      const availablePlugins = response.data.plugins.filter(p => p.available)
-      console.log('Available plugins:', availablePlugins)
-      setDetectionPlugins(availablePlugins)
-      setPluginsLoading(false)
-    } catch (error) {
-      console.error('Error loading detection plugins:', error)
-      console.error('Error details:', error.response?.data || error.message)
-      setDetectionPlugins([])
-      setPluginsLoading(false)
+    let cancelled = false
+    const attempt = async (retries = 5, delay = 2000) => {
+      for (let i = 0; i < retries && !cancelled; i++) {
+        try {
+          console.log(`Loading detection plugins (attempt ${i + 1}/${retries})…`)
+          const response = await axios.get(`${API_URL}/api/detection/plugins`)
+          if (cancelled) return
+          const availablePlugins = response.data.plugins.filter(p => p.available)
+          console.log('Available plugins:', availablePlugins)
+          setDetectionPlugins(availablePlugins)
+          setPluginsLoading(false)
+          return
+        } catch (error) {
+          console.warn(`Plugin load attempt ${i + 1} failed:`, error.message)
+          if (i < retries - 1 && !cancelled) {
+            await new Promise(r => setTimeout(r, delay))
+          }
+        }
+      }
+      if (!cancelled) {
+        console.error('Could not load detection plugins after retries')
+        setDetectionPlugins([])
+        setPluginsLoading(false)
+      }
     }
-  }
+    attempt()
+    return () => { cancelled = true }
+  }, [])
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0]

@@ -32,11 +32,10 @@ try:
     import torch.nn as nn
     from huggingface_hub import hf_hub_download
     from PIL import Image
-    import torchvision.transforms as transforms
     HAS_DEEP_LEARNING = True
 except ImportError:
     HAS_DEEP_LEARNING = False
-    print("Warning: Deep learning dependencies not available. Install torch, huggingface-hub, pillow, torchvision.")
+    print("Warning: Deep learning dependencies not available. Install torch, huggingface-hub, pillow.")
 
 
 # CNN Model Architecture for EEG Seizure Detection (ThomasCdnns compatible)
