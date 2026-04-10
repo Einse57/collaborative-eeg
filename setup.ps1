@@ -11,9 +11,9 @@ Write-Host ""
 Write-Host "Checking Python installation..." -ForegroundColor Yellow
 try {
     $pythonVersion = python --version 2>&1
-    Write-Host "✓ Python found: $pythonVersion" -ForegroundColor Green
+    Write-Host "[OK] Python found: $pythonVersion" -ForegroundColor Green
 } catch {
-    Write-Host "✗ Python not found. Please install Python 3.9+" -ForegroundColor Red
+    Write-Host "[ERROR] Python not found. Please install Python 3.9+" -ForegroundColor Red
     Write-Host "   Download from: https://www.python.org/downloads/" -ForegroundColor Yellow
     exit 1
 }
@@ -22,9 +22,9 @@ try {
 Write-Host "Checking Node.js installation..." -ForegroundColor Yellow
 try {
     $nodeVersion = node --version 2>&1
-    Write-Host "✓ Node.js found: $nodeVersion" -ForegroundColor Green
+    Write-Host "[OK] Node.js found: $nodeVersion" -ForegroundColor Green
 } catch {
-    Write-Host "✗ Node.js not found. Please install Node.js 18+" -ForegroundColor Red
+    Write-Host "[ERROR] Node.js not found. Please install Node.js 18+" -ForegroundColor Red
     Write-Host "   Download from: https://nodejs.org/" -ForegroundColor Yellow
     exit 1
 }
@@ -38,9 +38,9 @@ if (-not (Test-Path "backend\venv")) {
     Set-Location backend
     python -m venv venv
     Set-Location ..
-    Write-Host "✓ Virtual environment created" -ForegroundColor Green
+    Write-Host "[OK] Virtual environment created" -ForegroundColor Green
 } else {
-    Write-Host "✓ Virtual environment already exists" -ForegroundColor Green
+    Write-Host "[OK] Virtual environment already exists" -ForegroundColor Green
 }
 
 # Install Python dependencies
@@ -50,7 +50,7 @@ Set-Location backend
 pip install -r requirements.txt
 deactivate
 Set-Location ..
-Write-Host "✓ Python dependencies installed" -ForegroundColor Green
+Write-Host "[OK] Python dependencies installed" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "Setting up frontend..." -ForegroundColor Cyan
@@ -60,7 +60,7 @@ Write-Host "Installing Node.js dependencies..." -ForegroundColor Yellow
 Set-Location frontend
 npm install
 Set-Location ..
-Write-Host "✓ Node.js dependencies installed" -ForegroundColor Green
+Write-Host "[OK] Node.js dependencies installed" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "Configuring network settings..." -ForegroundColor Cyan
@@ -71,18 +71,18 @@ $networkIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
 } | Select-Object -First 1).IPAddress
 
 if ($networkIP) {
-    Write-Host "✓ Network IP detected: $networkIP" -ForegroundColor Green
+    Write-Host "[OK] Network IP detected: $networkIP" -ForegroundColor Green
     
     # Create .env file
     $envPath = "frontend\.env"
     $envContent = "# Backend API URL - Auto-configured`nVITE_API_URL=http://${networkIP}:8000`n"
     Set-Content -Path $envPath -Value $envContent
-    Write-Host "✓ Created frontend/.env" -ForegroundColor Green
+    Write-Host "[OK] Created frontend/.env" -ForegroundColor Green
     
     # Create uploads directory
     if (-not (Test-Path "backend\uploads")) {
         New-Item -ItemType Directory -Path "backend\uploads" | Out-Null
-        Write-Host "✓ Created uploads directory" -ForegroundColor Green
+        Write-Host "[OK] Created uploads directory" -ForegroundColor Green
     }
     
     Write-Host ""
@@ -103,7 +103,7 @@ if ($networkIP) {
     Write-Host "   Backend: http://${networkIP}:8000" -ForegroundColor Green
     Write-Host ""
 } else {
-    Write-Host "⚠️  Could not detect network IP" -ForegroundColor Yellow
+    Write-Host "[WARNING] Could not detect network IP" -ForegroundColor Yellow
     Write-Host "   Using localhost configuration" -ForegroundColor Yellow
     
     $envPath = "frontend\.env"
