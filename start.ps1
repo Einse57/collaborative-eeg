@@ -182,7 +182,7 @@ if ($Nginx) {
     $backendInfo = "Write-Host 'Backend Server' -ForegroundColor Green; Write-Host '';"
 }
 
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$scriptPath\backend'; $backendInfo if (Test-Path '.\venv\Scripts\python.exe') { .\venv\Scripts\python.exe -m uvicorn app.main:socket_app --host $backendHost --port 8000 --reload } else { python -m uvicorn app.main:socket_app --host $backendHost --port 8000 --reload }"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$scriptPath\backend'; $backendInfo python -m uvicorn app.main:socket_app --host $backendHost --port 8000 --reload"
 
 Start-Sleep -Seconds 3
 

@@ -28,6 +28,9 @@ transformers>=4.36.0
 einops>=0.7.0
 accelerate>=0.25.0
 
+# MVPFormer plugin (optional)
+ptwt>=0.1.9
+
 # Database (optional for MVP - using in-memory storage)
 # sqlalchemy==2.0.23
 # psycopg2-binary==2.9.9
