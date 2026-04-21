@@ -159,9 +159,9 @@ async def delete_annotation(annotation_id: str, dataset_id: str, request: Reques
 async def export_annotations(dataset_id: str, format: str = "json"):
     """Export annotations in specified format"""
     if dataset_id not in annotations_db:
-        return {'annotations': []}
-    
-    annotations = list(annotations_db[dataset_id].values())
+        annotations = []
+    else:
+        annotations = list(annotations_db[dataset_id].values())
     
     if format == "csv":
         import csv
