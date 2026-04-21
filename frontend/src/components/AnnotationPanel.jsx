@@ -235,19 +235,29 @@ function AnnotationPanel({ datasetId, selectedDataset, annotations, customAnnota
   }
 
   const isEventDetection = (user) => {
-    return user === 'EventDetector_RF' || user === 'EventDetector_CNN' ||
-           user === 'SeizureDetector_RF' || user === 'SeizureDetector_CNN'  // backwards compatibility
+    return user && user.startsWith('EventDetector_')
   }
 
   const getDetectionMethodLabel = (user) => {
     if (user === 'EventDetector_RF' || user === 'SeizureDetector_RF') return '🌲 RF'
     if (user === 'EventDetector_CNN' || user === 'SeizureDetector_CNN') return '🔷 CNN'
-    return ''
+    if (user === 'EventDetector_CNN_CBAM') return '🔷 CNN+CBAM'
+    if (user === 'EventDetector_CNN_ENSEMBLE') return '🎯 CNN Ensemble'
+    if (user === 'EventDetector_REVE') return '🧠 REVE'
+    if (user === 'EventDetector_ENSEMBLE_REVE_CNN') return '🔗 Ensemble'
+    if (user === 'EventDetector_DISTILLED_REVE_SINGLE') return '🎓 Distilled (Single)'
+    if (user === 'EventDetector_DISTILLED_REVE_ENSEMBLE') return '🎓 Distilled (Ensemble)'
+    return user?.replace('EventDetector_', '') || ''
   }
 
   const getDetectionMethodColor = (user) => {
     if (user === 'EventDetector_RF' || user === 'SeizureDetector_RF') return '#2e7d32'
     if (user === 'EventDetector_CNN' || user === 'SeizureDetector_CNN') return '#1565c0'
+    if (user === 'EventDetector_CNN_CBAM') return '#1565c0'
+    if (user === 'EventDetector_CNN_ENSEMBLE') return '#0d47a1'
+    if (user === 'EventDetector_REVE') return '#7b1fa2'
+    if (user === 'EventDetector_ENSEMBLE_REVE_CNN') return '#e65100'
+    if (user?.startsWith('EventDetector_DISTILLED')) return '#00838f'
     return '#666'
   }
 

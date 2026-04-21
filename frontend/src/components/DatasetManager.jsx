@@ -21,12 +21,13 @@ const API_URL = getApiUrl();
 
 function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSuccess, onLoadDatasets, onAnnotationsRefresh }) {
   const [uploading, setUploading] = useState(false)
-  const [loadingSample, setLoadingSample] = useState(false)
   const [detectingEvents, setDetectingEvents] = useState(false)
   const [detectionMethod, setDetectionMethod] = useState(null)
   const [detectionPlugins, setDetectionPlugins] = useState([])
   const [pluginsLoading, setPluginsLoading] = useState(true)
   const [detectionProgress, setDetectionProgress] = useState({ pct: 0, message: '' })
+  const [pluginConfigs, setPluginConfigs] = useState({})  // { pluginId: { key: value } }
+  const [expandedPlugin, setExpandedPlugin] = useState(null)  // pluginId or null
 
   // Load available detection plugins on mount (retry if backend not ready yet)
   useEffect(() => {
@@ -40,6 +41,18 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
           const availablePlugins = response.data.plugins.filter(p => p.available)
           console.log('Available plugins:', availablePlugins)
           setDetectionPlugins(availablePlugins)
+          // Initialize per-plugin config from schema defaults
+          const defaults = {}
+          for (const p of availablePlugins) {
+            if (p.config_schema) {
+              const cfg = {}
+              for (const [key, schema] of Object.entries(p.config_schema)) {
+                cfg[key] = schema.default
+              }
+              defaults[p.id] = cfg
+            }
+          }
+          setPluginConfigs(defaults)
           setPluginsLoading(false)
           return
         } catch (error) {
@@ -80,19 +93,6 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
     }
   }
 
-  const handleLoadSample = async (sampleName) => {
-    setLoadingSample(true)
-    try {
-      await axios.post(`${API_URL}/api/datasets/samples/${sampleName}`)
-      // No alert - dataset will appear in the list visually
-      onLoadDatasets()
-    } catch (error) {
-      alert('Error loading sample dataset: ' + error.message)
-    } finally {
-      setLoadingSample(false)
-    }
-  }
-
   const handleDetectEvents = async (pluginId) => {
     if (!selectedDataset) {
       alert('Please select a dataset first!')
@@ -104,12 +104,14 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
     
     try {
       // Start the detection job
+      const cfg = pluginConfigs[pluginId] || {}
       const startResponse = await axios.post(
         `${API_URL}/api/detection/${selectedDataset.id}/detect`,
         {
           plugin_id: pluginId,
-          segment_duration: 2.0,
-          threshold: 0.5
+          segment_duration: cfg.segment_duration ?? 2.0,
+          threshold: cfg.threshold ?? 0.5,
+          config: cfg
         }
       )
       
@@ -150,7 +152,12 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
     }
   }
 
-
+  const updatePluginConfig = (pluginId, key, value) => {
+    setPluginConfigs(prev => ({
+      ...prev,
+      [pluginId]: { ...(prev[pluginId] || {}), [key]: value }
+    }))
+  }
 
   const handleDeleteDataset = async (dataset, event) => {
     event.stopPropagation() // Prevent triggering dataset selection
@@ -190,17 +197,6 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
         />
       </div>
 
-      <div className="sample-section">
-        <h3>Sample Datasets</h3>
-        <button
-          className="sample-btn secondary-btn"
-          onClick={() => handleLoadSample('testing')}
-          disabled={loadingSample}
-        >
-          {loadingSample ? '⏳ Loading...' : '🔬 Download from MNE'}
-        </button>
-      </div>
-
       <div className="event-detection-section">
         <h3>🧠 Event Detection</h3>
         <p className="warning-message" style={{fontSize: '0.7rem', color: '#d32f2f', marginBottom: '0.5rem'}}>
@@ -217,21 +213,94 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
           <>
             <div className="detection-buttons">
               {detectionPlugins.map(plugin => (
-                <button
-                  key={plugin.id}
-                  className="detection-btn"
-                  style={{
-                    background: plugin.color,
-                    opacity: (detectingEvents || !selectedDataset) ? 0.5 : 1
-                  }}
-                  onClick={() => handleDetectEvents(plugin.id)}
-                  disabled={detectingEvents || !selectedDataset}
-                  title={plugin.description}
-                >
-                  {detectingEvents && detectionMethod === plugin.id 
-                    ? `⏳ ${detectionProgress.pct}%` 
-                    : `${plugin.icon} ${plugin.name}`}
-                </button>
+                <div key={plugin.id} style={{width: '100%'}}>
+                  <div style={{display: 'flex', gap: '4px', marginBottom: expandedPlugin === plugin.id ? '0' : undefined}}>
+                    <button
+                      className="detection-btn"
+                      style={{
+                        background: plugin.color,
+                        opacity: (detectingEvents || !selectedDataset) ? 0.5 : 1,
+                        flex: 1,
+                      }}
+                      onClick={() => handleDetectEvents(plugin.id)}
+                      disabled={detectingEvents || !selectedDataset}
+                      title={plugin.description}
+                    >
+                      {detectingEvents && detectionMethod === plugin.id 
+                        ? `⏳ ${detectionProgress.pct}%` 
+                        : `${plugin.icon} ${plugin.name}`}
+                    </button>
+                    {plugin.config_schema && Object.keys(plugin.config_schema).length > 0 && (
+                      <button
+                        className="detection-btn"
+                        style={{
+                          background: expandedPlugin === plugin.id ? '#555' : '#888',
+                          padding: '4px 8px',
+                          minWidth: '32px',
+                          flex: 'none',
+                          fontSize: '0.75rem',
+                        }}
+                        onClick={() => setExpandedPlugin(expandedPlugin === plugin.id ? null : plugin.id)}
+                        title="Configure plugin"
+                      >
+                        ⚙
+                      </button>
+                    )}
+                  </div>
+                  {expandedPlugin === plugin.id && plugin.config_schema && (
+                    <div style={{
+                      background: '#1e1e1e',
+                      border: '1px solid #444',
+                      borderRadius: '4px',
+                      padding: '8px',
+                      marginBottom: '4px',
+                      fontSize: '0.75rem',
+                    }}>
+                      {Object.entries(plugin.config_schema).map(([key, schema]) => {
+                        const val = pluginConfigs[plugin.id]?.[key] ?? schema.default
+                        if (schema.type === 'number') {
+                          return (
+                            <div key={key} style={{marginBottom: '6px'}}>
+                              <label style={{display: 'block', color: '#aaa', marginBottom: '2px'}}>
+                                {schema.label || key}: <strong style={{color: '#fff'}}>{val}</strong>
+                              </label>
+                              <input
+                                type="range"
+                                min={schema.min ?? 0}
+                                max={schema.max ?? 1}
+                                step={schema.step ?? 0.01}
+                                value={val}
+                                onChange={(e) => updatePluginConfig(plugin.id, key, parseFloat(e.target.value))}
+                                style={{width: '100%'}}
+                              />
+                            </div>
+                          )
+                        }
+                        if (schema.type === 'string') {
+                          return (
+                            <div key={key} style={{marginBottom: '6px'}}>
+                              <label style={{display: 'block', color: '#aaa', marginBottom: '2px'}}>
+                                {schema.label || key}
+                              </label>
+                              <input
+                                type="text"
+                                value={val || ''}
+                                onChange={(e) => updatePluginConfig(plugin.id, key, e.target.value)}
+                                placeholder={schema.default || ''}
+                                style={{
+                                  width: '100%', padding: '3px 6px',
+                                  background: '#2a2a2a', border: '1px solid #555',
+                                  borderRadius: '3px', color: '#ddd', fontSize: '0.75rem',
+                                }}
+                              />
+                            </div>
+                          )
+                        }
+                        return null
+                      })}
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
             {detectingEvents && detectionProgress.message && (

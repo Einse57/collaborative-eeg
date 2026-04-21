@@ -375,17 +375,26 @@ class MNEService:
         return output_path
     
     def download_sample_dataset(self, dataset_name: str = 'sample') -> str:
-        """Download MNE sample dataset"""
+        """Download MNE sample dataset and copy to backend/datasets/."""
+        import shutil
+        from app.core.config import settings
+
+        datasets_dir = Path(settings.UPLOAD_DIR)
+        datasets_dir.mkdir(parents=True, exist_ok=True)
+
         if dataset_name == 'sample':
             data_path = mne.datasets.sample.data_path()
-            file_path = data_path / 'MEG' / 'sample' / 'sample_audvis_raw.fif'
-            return str(file_path)
+            src = data_path / 'MEG' / 'sample' / 'sample_audvis_raw.fif'
         elif dataset_name == 'testing':
             data_path = mne.datasets.testing.data_path()
-            file_path = data_path / 'MEG' / 'sample' / 'sample_audvis_trunc_raw.fif'
-            return str(file_path)
+            src = data_path / 'MEG' / 'sample' / 'sample_audvis_trunc_raw.fif'
         else:
             raise ValueError(f"Unknown sample dataset: {dataset_name}")
+
+        dest = datasets_dir / src.name
+        if not dest.exists():
+            shutil.copy2(str(src), str(dest))
+        return str(dest)
     
     def persist_annotations_to_file(
         self,

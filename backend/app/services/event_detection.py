@@ -180,12 +180,13 @@ class EventDetectionService:
             
             if is_seizure and confidence >= threshold:
                 onset_time = start_sample / sfreq
+                conf = float(confidence)
                 seizure_annotations.append({
                     'onset': float(onset_time),
                     'duration': float(segment_duration),
-                    'description': 'Event_detected',
+                    'description': f'Event_detected ({conf * 100:.1f}%)',
                     'user': 'EventDetector_RF',
-                    'confidence': float(confidence),
+                    'confidence': conf,
                     'method': 'Random Forest + DWT'
                 })
                 print(f"  Event detected at {onset_time:.1f}s (confidence: {confidence:.2f})")
@@ -363,12 +364,13 @@ class EventDetectionService:
             
             if is_seizure and confidence >= threshold:
                 onset_time = start_sample / sfreq
+                conf = float(confidence)
                 seizure_annotations.append({
                     'onset': float(onset_time),
                     'duration': float(segment_duration),
-                    'description': 'Event_detected',
+                    'description': f'Event_detected ({conf * 100:.1f}%)',
                     'user': 'EventDetector_CNN',
-                    'confidence': float(confidence),
+                    'confidence': conf,
                     'method': 'CNN (Spectrogram-based)'
                 })
                 print(f"  Event detected at {onset_time:.1f}s (confidence: {confidence:.2f})")

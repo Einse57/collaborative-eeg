@@ -82,6 +82,10 @@ This platform provides a web interface for annotating EEG/MEG recordings with re
                     └──────────────────────┘
 ```
 
+### Adding a Plugin
+
+Copy `backend/plugins/_example/`, remove the underscore prefix, and implement the `DetectionPlugin` interface. The loader auto-discovers any non-private subdirectory.
+
 ## Installation
 
 ### Quick Start (Recommended)

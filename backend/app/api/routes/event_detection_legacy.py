@@ -7,6 +7,7 @@ from typing import Optional, List
 from datetime import datetime
 from ...services.mne_service import mne_service
 from ...services.event_detection import event_detection_service
+from ..routes.datasets import datasets_db
 
 router = APIRouter()
 
@@ -33,9 +34,19 @@ async def detect_events(dataset_id: str, request: EventDetectionRequest):
     - 'rf': Random Forest with Wavelet features (classical ML)
     - 'cnn': Convolutional Neural Network (deep learning)
     """
-    # Check if dataset is loaded
+    # Check if dataset is loaded — auto-reload if evicted from memory
     if dataset_id not in mne_service.loaded_datasets:
-        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not loaded")
+        ds_info = datasets_db.get(dataset_id)
+        if ds_info and ds_info.get("file_path"):
+            try:
+                mne_service.load_file(ds_info["file_path"])
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Could not reload dataset {dataset_id}: {e}",
+                )
+        else:
+            raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not loaded")
     
     raw = mne_service.loaded_datasets[dataset_id]
     

@@ -145,57 +145,6 @@ async def get_dataset_data(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/samples/list")
-async def list_sample_datasets():
-    """List available MNE sample datasets"""
-    return {
-        'samples': [
-            {
-                'name': 'sample',
-                'description': 'MNE sample dataset (auditory/visual)',
-                'size': 'Full dataset (~1.5GB)'
-            },
-            {
-                'name': 'testing',
-                'description': 'MNE testing dataset (truncated)',
-                'size': 'Small dataset (~50MB)'
-            }
-        ]
-    }
-
-@router.post("/samples/{sample_name}")
-async def load_sample_dataset(sample_name: str):
-    """Download and load an MNE sample dataset"""
-    try:
-        file_path = mne_service.download_sample_dataset(sample_name)
-        
-        # Load with MNE
-        raw, dataset_id = mne_service.load_file(file_path)
-        metadata = mne_service.get_metadata(raw)
-        annotations = mne_service.load_annotations(raw)
-        
-        # Store dataset info
-        dataset_id = f"sample_{sample_name}"
-        dataset_info = {
-            'id': dataset_id,
-            'filename': f"{sample_name}_dataset.fif",
-            'file_path': file_path,
-            'metadata': metadata,
-            'annotations': annotations,
-            'is_sample': True
-        }
-        datasets_db[dataset_id] = dataset_info
-        
-        return {
-            'dataset_id': dataset_id,
-            'filename': dataset_info['filename'],
-            'metadata': metadata,
-            'annotations': annotations
-        }
-    
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
 @router.get("/{dataset_id}/export/edfplus")
 async def export_to_edfplus(dataset_id: str):
     """Export dataset with annotations to EDF+ format"""
@@ -302,7 +251,27 @@ async def export_to_edfplus(dataset_id: str):
         print(f"Data range check - min: {data_sample.min():.6f}, max: {data_sample.max():.6f}, mean: {data_sample.mean():.6f}")
         
         try:
-            # MNE's export function - specify physical range for better compatibility
+            # EDF physical min/max header fields are limited to 8 characters.
+            # MNE stores EEG in Volts internally; edfio converts to µV for EDF,
+            # which can overflow the 8-char field for large-amplitude iEEG data.
+            # Fix: pass an explicit physical_range in Volts that produces a µV
+            # string fitting in 8 chars (max ±9999999 µV = ±9.999999 V).
+            data_all = raw_copy.get_data()
+            pmin, pmax = float(data_all.min()), float(data_all.max())
+            # Convert to µV to check if it fits in 8 chars
+            pmin_uv, pmax_uv = pmin * 1e6, pmax * 1e6
+            if len(f"{pmin_uv:.0f}") > 8 or len(f"{pmax_uv:.0f}") > 8:
+                # Data in Volts is too large for EDF µV headers.
+                # Likely the data was loaded in µV but MNE thinks it's Volts.
+                # Rescale: divide by 1e6 so MNE's V→µV conversion recovers
+                # the original range.
+                print(f"Data range in µV would be {pmin_uv:.0f} to {pmax_uv:.0f} (overflows EDF 8-char header)")
+                print(f"Rescaling: data appears to already be in µV, correcting units")
+                raw_copy.apply_function(lambda x: x * 1e-6, picks='all', channel_wise=False)
+                data_all = raw_copy.get_data()
+                pmin, pmax = float(data_all.min()), float(data_all.max())
+                print(f"New data range: {pmin:.9f} to {pmax:.9f} V ({pmin*1e6:.1f} to {pmax*1e6:.1f} µV)")
+
             raw_copy.export(str(output_path), fmt='edf', overwrite=True, physical_range='auto')
             print(f"Successfully exported to {output_path}")
             # Check file size

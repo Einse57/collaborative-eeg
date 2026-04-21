@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     ]
     
     # File storage
-    UPLOAD_DIR: str = "./datasets"
+    UPLOAD_DIR: str = "../datasets"
     MAX_UPLOAD_SIZE: int = 2 * 1024 * 1024 * 1024  # 2GB
     
     # Database (for future use)

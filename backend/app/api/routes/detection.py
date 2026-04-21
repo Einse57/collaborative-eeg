@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ...services.mne_service import mne_service
+from ..routes.datasets import datasets_db
 from plugins import plugin_registry
 from plugins.loader import load_plugins
 
@@ -183,9 +184,19 @@ async def detect_events(dataset_id: str, request: DetectionRequest):
     Start a detection job.  Returns immediately with a job_id that the
     frontend can poll via GET /detection/jobs/{job_id}.
     """
-    # Validate dataset
+    # Validate dataset — auto-reload if evicted from memory
     if dataset_id not in mne_service.loaded_datasets:
-        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not loaded")
+        ds_info = datasets_db.get(dataset_id)
+        if ds_info and ds_info.get("file_path"):
+            try:
+                mne_service.load_file(ds_info["file_path"])
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Could not reload dataset {dataset_id}: {e}",
+                )
+        else:
+            raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not loaded")
 
     # Validate plugin
     plugin = plugin_registry.get_plugin(request.plugin_id)
