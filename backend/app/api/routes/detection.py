@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ...services.mne_service import mne_service
@@ -100,7 +100,7 @@ class JobStatusResponse(BaseModel):
 # Background worker
 # ---------------------------------------------------------------------------
 
-def _run_detection_job(job: DetectionJob, raw, plugin, kwargs):
+def _run_detection_job(job: DetectionJob, raw, plugin, kwargs, sio=None, loop=None):
     """Executed in a background thread."""
     try:
         job.status = JobStatus.RUNNING
@@ -158,6 +158,24 @@ def _run_detection_job(job: DetectionJob, raw, plugin, kwargs):
         )
         print(f"  Job {job.job_id}: completed — {len(detections)} detections")
 
+        # Broadcast to all users viewing this dataset so their UIs refresh
+        if sio and loop and saved_annotations:
+            try:
+                room = f"dataset_{job.dataset_id}"
+                # Emit a single event — the frontend handler reloads all
+                # annotations for the dataset, so one notification suffices.
+                event_data = {
+                    "dataset_id": job.dataset_id,
+                    "count": len(saved_annotations),
+                    "plugin": job.plugin_name,
+                }
+                asyncio.run_coroutine_threadsafe(
+                    sio.emit('annotation_created', event_data, room=room),
+                    loop,
+                )
+            except Exception as e:
+                print(f"Warning: Could not broadcast detection annotations: {e}")
+
     except Exception as exc:
         job.status = JobStatus.FAILED
         job.error = str(exc)
@@ -182,7 +200,7 @@ async def list_detection_plugins():
 
 
 @router.post("/{dataset_id}/detect")
-async def detect_events(dataset_id: str, request: DetectionRequest):
+async def detect_events(dataset_id: str, request: DetectionRequest, http_request: Request):
     """
     Start a detection job.  Returns immediately with a job_id that the
     frontend can poll via GET /detection/jobs/{job_id}.
@@ -232,9 +250,14 @@ async def detect_events(dataset_id: str, request: DetectionRequest):
     with _jobs_lock:
         _jobs[job_id] = job
 
+    # Capture the Socket.IO server and the running event loop so the
+    # background thread can broadcast annotation events to remote users.
+    _sio = getattr(http_request.app.state, 'sio', None)
+    _loop = asyncio.get_running_loop()
+
     thread = threading.Thread(
         target=_run_detection_job,
-        args=(job, raw, plugin, kwargs),
+        args=(job, raw, plugin, kwargs, _sio, _loop),
         daemon=True,
     )
     thread.start()
