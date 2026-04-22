@@ -113,7 +113,17 @@ class PluginRegistry:
     
     def __init__(self):
         self._plugins: Dict[str, DetectionPlugin] = {}
+        self._loading: bool = False
+        self._loaded: bool = False
     
+    @property
+    def is_loading(self) -> bool:
+        return self._loading
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._loaded
+
     def register(self, plugin: DetectionPlugin):
         """Register a new plugin"""
         self._plugins[plugin.plugin_id] = plugin

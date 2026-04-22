@@ -9,6 +9,7 @@ each package's namespace are instantiated and registered.
 """
 import importlib
 import inspect
+import threading
 from pathlib import Path
 
 from . import plugin_registry, DetectionPlugin
@@ -21,6 +22,7 @@ def load_plugins():
     Auto-discover plugin sub-packages, instantiate all concrete
     DetectionPlugin subclasses, and register them.
     """
+    plugin_registry._loading = True
     print("\n🔌 Loading detection plugins...")
 
     for candidate in sorted(_PLUGIN_DIR.iterdir()):
@@ -66,4 +68,13 @@ def load_plugins():
         for p in unavailable_plugins:
             print(f"  {p['icon']} {p['name']} ({p['id']})")
 
+    plugin_registry._loading = False
+    plugin_registry._loaded = True
     print()
+
+
+def load_plugins_background():
+    """Start plugin loading in a daemon thread so the server starts immediately."""
+    t = threading.Thread(target=load_plugins, daemon=True, name="plugin-loader")
+    t.start()
+    return t

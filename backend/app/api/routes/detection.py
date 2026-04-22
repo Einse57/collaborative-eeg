@@ -19,12 +19,13 @@ from pydantic import BaseModel
 from ...services.mne_service import mne_service
 from ..routes.datasets import datasets_db
 from plugins import plugin_registry
-from plugins.loader import load_plugins
+from plugins.loader import load_plugins_background
 
 router = APIRouter()
 
-# Load plugins on module import
-load_plugins()
+# Load plugins in background so the server starts immediately.
+# Remote users can access datasets, annotations, etc. right away.
+load_plugins_background()
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +175,9 @@ async def list_detection_plugins():
     plugins = plugin_registry.list_plugins(available_only=False)
     return {
         'plugins': plugins,
-        'count': len([p for p in plugins if p['available']])
+        'count': len([p for p in plugins if p['available']]),
+        'loading': plugin_registry.is_loading,
+        'loaded': plugin_registry.is_loaded,
     }
 
 
