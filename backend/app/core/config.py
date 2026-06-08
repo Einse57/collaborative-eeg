@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # File storage
     UPLOAD_DIR: str = "../datasets"
     MAX_UPLOAD_SIZE: int = 2 * 1024 * 1024 * 1024  # 2GB
+
+    # H5 local file browser — comma-separated list of allowed root directories
+    H5_BROWSE_ROOTS: str = ""
     
     # Database (for future use)
     DATABASE_URL: str = "sqlite:///./eeg_annotations.db"

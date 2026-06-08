@@ -3,12 +3,13 @@ Dataset API routes
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from typing import Optional, List
 import shutil
 from pathlib import Path
 import os
 
-from app.services.mne_service import mne_service
+from app.services.mne_service import mne_service, _scan_h5_info
 from app.core.config import settings
 
 router = APIRouter()
@@ -331,3 +332,149 @@ async def delete_dataset(dataset_id: str):
     del mne_service.loaded_datasets[dataset_id]
     
     return {"message": "Dataset deleted successfully"}
+
+
+# ── H5 local file browser endpoints ──────────────────────────────────────
+
+# Allowed root directories for browsing (prevents arbitrary filesystem access)
+# Configured via H5_BROWSE_ROOTS env var (comma-separated paths)
+_H5_ALLOWED_ROOTS = [Path(settings.UPLOAD_DIR).resolve()]
+if settings.H5_BROWSE_ROOTS:
+    _H5_ALLOWED_ROOTS.extend(
+        Path(p.strip()).resolve() for p in settings.H5_BROWSE_ROOTS.split(",") if p.strip()
+    )
+
+
+def _is_path_allowed(p: Path) -> bool:
+    """Check that p is under one of the allowed roots."""
+    resolved = p.resolve()
+    return any(
+        resolved == root or root in resolved.parents
+        for root in _H5_ALLOWED_ROOTS
+    )
+
+
+@router.get("/h5/browse")
+async def browse_h5_directory(
+    path: str = Query(None, description="Directory to browse (defaults to first allowed root)"),
+):
+    """Browse a local directory for H5 files.
+
+    Returns list of patient folders and H5 files in the directory.
+    Only directories under allowed roots are accessible.
+    """
+    if path is None:
+        # Default to first allowed root
+        path = str(_H5_ALLOWED_ROOTS[0])
+    p = Path(path)
+    if not _is_path_allowed(p):
+        raise HTTPException(status_code=403, detail="Path outside allowed directories")
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found: {path}")
+    if not p.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+
+    entries = []
+    try:
+        for child in sorted(p.iterdir()):
+            if child.name.startswith("."):
+                continue
+            if child.is_dir():
+                # Count H5 files inside
+                h5_count = len(list(child.glob("*.h5")))
+                entries.append({
+                    "name": child.name,
+                    "path": str(child),
+                    "type": "directory",
+                    "h5_count": h5_count,
+                })
+            elif child.suffix.lower() == ".h5":
+                entries.append({
+                    "name": child.name,
+                    "path": str(child),
+                    "type": "file",
+                    "size_mb": child.stat().st_size / (1024 ** 2),
+                })
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    return {"path": str(p), "entries": entries}
+
+
+@router.get("/h5/inspect")
+async def inspect_h5_file(
+    path: str = Query(..., description="Path to H5 file"),
+):
+    """Inspect an H5 file: return metadata, channel count, duration,
+    seizure annotations, and estimated memory usage — without loading data.
+    """
+    p = Path(path)
+    if not _is_path_allowed(p):
+        raise HTTPException(status_code=403, detail="Path outside allowed directories")
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    if p.suffix.lower() != ".h5":
+        raise HTTPException(status_code=400, detail="Not an H5 file")
+
+    try:
+        info = _scan_h5_info(str(p))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading H5: {e}")
+
+    # Estimate memory for full load (float64)
+    mem_gb = info["n_channels"] * info["n_samples"] * 8 / (1024 ** 3)
+
+    return {
+        "path": str(p),
+        "patient_id": p.stem.replace("_total", "").split("_part_")[0],
+        **info,
+        "estimated_memory_gb": round(mem_gb, 2),
+    }
+
+
+class H5LoadRequest(BaseModel):
+    path: str
+    start_sec: float = 0
+    duration_sec: Optional[float] = None
+
+
+@router.post("/h5/load")
+async def load_h5_file(req: H5LoadRequest):
+    """Load an H5 file (or segment) into the annotation platform.
+
+    Returns dataset_id, metadata, and annotations — same shape as upload.
+    """
+    p = Path(req.path)
+    if not _is_path_allowed(p):
+        raise HTTPException(status_code=403, detail="Path outside allowed directories")
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {req.path}")
+
+    try:
+        raw, dataset_id = mne_service.load_file(
+            str(p), start_sec=req.start_sec, duration_sec=req.duration_sec,
+        )
+        metadata = mne_service.get_metadata(raw)
+        annotations = mne_service.load_annotations(raw)
+
+        # Register in datasets_db so other endpoints work
+        datasets_db[dataset_id] = {
+            "id": dataset_id,
+            "filename": p.name,
+            "file_path": str(p),
+            "metadata": metadata,
+            "annotations": annotations,
+            "uploaded_at": None,
+        }
+
+        return {
+            "dataset_id": dataset_id,
+            "filename": p.name,
+            "metadata": metadata,
+            "annotations": annotations,
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error loading H5: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))

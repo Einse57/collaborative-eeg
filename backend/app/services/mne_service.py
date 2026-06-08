@@ -8,6 +8,176 @@ from typing import Dict, List, Optional, Tuple
 import json
 
 
+# ── H5 helpers (SWEZ-ETHZ iEEG HDF5 format) ──────────────────────────────
+
+def _scan_h5_info(file_path: str) -> Dict:
+    """Read H5 metadata without loading signal data into memory.
+
+    Returns dict with: n_channels, n_samples, fs, duration_hours,
+    size_gb, seizures, is_vds_broken, part_files.
+    """
+    import h5py
+    try:
+        import hdf5plugin  # noqa: F401 — register Blosc decompressor
+    except ImportError:
+        pass
+
+    p = Path(file_path)
+    f = h5py.File(file_path, "r")
+
+    # Sampling rate
+    fs = None
+    for key in ["data/Fs", "info/fs", "info/Fs", "info/sampling_rate"]:
+        if key in f:
+            fs = float(f[key][()])
+            break
+    if fs is None and "sampling_rate" in f.attrs:
+        fs = float(f.attrs["sampling_rate"])
+    if fs is None:
+        fs = 512.0
+
+    ieeg = f["data/ieeg"]
+    n_ch = ieeg.shape[0]
+    n_samples = ieeg.shape[1]
+
+    # Seizure annotations
+    seizures = []
+    if "data/seizures" in f:
+        sz_data = f["data/seizures"][()]
+        seizures = [
+            {"onset": float(row[0]["onsets"]), "offset": float(row[0]["offsets"])}
+            for row in sz_data
+        ]
+    elif "annotations_start" in f:
+        starts = f["annotations_start"][()].ravel().tolist()
+        stops = f["annotations_stop"][()].ravel().tolist()
+        seizures = [{"onset": s, "offset": e} for s, e in zip(starts, stops)]
+
+    # Check for broken VDS
+    is_vds_broken = False
+    if "_total" in p.stem:
+        test = ieeg[:, :min(512, n_samples)]
+        if np.all(test == 0):
+            is_vds_broken = True
+
+    # Find part files
+    patient_id = p.stem.replace("_total", "").split("_part_")[0]
+    part_files = sorted(
+        p.parent.glob(f"{patient_id}_part_*.h5"),
+        key=lambda x: int(x.stem.split("_part_")[1]),
+    )
+
+    # If VDS broken, compute total samples from parts
+    if is_vds_broken and part_files:
+        n_samples = 0
+        for pf in part_files:
+            with h5py.File(str(pf), "r") as pf_h:
+                n_samples += pf_h["data/ieeg"].shape[1]
+
+    f.close()
+
+    duration_s = n_samples / fs
+    size_bytes = p.stat().st_size
+    if is_vds_broken and part_files:
+        size_bytes = sum(pf.stat().st_size for pf in part_files)
+
+    return {
+        "n_channels": n_ch,
+        "n_samples": n_samples,
+        "fs": fs,
+        "duration_seconds": duration_s,
+        "duration_hours": duration_s / 3600,
+        "size_gb": size_bytes / (1024 ** 3),
+        "seizures": seizures,
+        "n_seizures": len(seizures),
+        "is_vds_broken": is_vds_broken,
+        "part_files": [str(pf) for pf in part_files],
+    }
+
+
+def _load_h5_as_raw(
+    file_path: str,
+    start_sec: float = 0,
+    duration_sec: Optional[float] = None,
+) -> mne.io.RawArray:
+    """Load SWEZ-ETHZ H5 file (or segment) as MNE RawArray.
+
+    Args:
+        file_path: Path to *_total.h5 or *_part_N.h5
+        start_sec: Start time in seconds (0 = beginning)
+        duration_sec: Duration to load in seconds (None = entire file)
+    """
+    import h5py
+    try:
+        import hdf5plugin  # noqa: F401
+    except ImportError:
+        pass
+
+    info = _scan_h5_info(file_path)
+    fs = info["fs"]
+    n_ch = info["n_channels"]
+
+    # Determine sample range
+    start_sample = int(start_sec * fs)
+    if duration_sec is not None:
+        end_sample = min(start_sample + int(duration_sec * fs), info["n_samples"])
+    else:
+        end_sample = info["n_samples"]
+
+    # Read data — handle VDS fallback
+    if info["is_vds_broken"] and info["part_files"]:
+        # Read from part files
+        chunks = []
+        offset = 0
+        for pf_path in info["part_files"]:
+            with h5py.File(pf_path, "r") as pf_h:
+                pf_samples = pf_h["data/ieeg"].shape[1]
+                pf_end = offset + pf_samples
+                if pf_end <= start_sample:
+                    offset = pf_end
+                    continue
+                if offset >= end_sample:
+                    break
+                local_start = max(0, start_sample - offset)
+                local_end = min(pf_samples, end_sample - offset)
+                chunks.append(np.array(pf_h["data/ieeg"][:, local_start:local_end],
+                                       dtype=np.float64))
+                offset = pf_end
+        data = np.concatenate(chunks, axis=1) if chunks else np.zeros((n_ch, 0))
+    else:
+        f = h5py.File(file_path, "r")
+        data = np.array(f["data/ieeg"][:, start_sample:end_sample], dtype=np.float64)
+        f.close()
+
+    # Build MNE RawArray
+    ch_names = [f"iEEG{i:03d}" for i in range(n_ch)]
+    ch_types = ["eeg"] * n_ch
+    mne_info = mne.create_info(ch_names=ch_names, sfreq=fs, ch_types=ch_types)
+    raw = mne.io.RawArray(data, mne_info)
+
+    # Add seizure annotations (adjusted for segment offset)
+    if info["seizures"]:
+        onsets, durations, descriptions = [], [], []
+        seg_start = start_sec
+        seg_end = end_sample / fs
+        for sz in info["seizures"]:
+            sz_on = sz["onset"]
+            sz_off = sz["offset"]
+            if sz_off <= seg_start or sz_on >= seg_end:
+                continue
+            local_on = max(sz_on - seg_start, 0.0)
+            local_off = min(sz_off - seg_start, seg_end - seg_start)
+            onsets.append(local_on)
+            durations.append(local_off - local_on)
+            descriptions.append("Seizure")
+        if onsets:
+            raw.set_annotations(mne.Annotations(
+                onset=onsets, duration=durations, description=descriptions
+            ))
+
+    return raw
+
+
 # ── .mat helpers (SWEC-ETHZ iEEG format) ──────────────────────────────────
 
 _EEG_KEYS = ["EEG", "eeg", "data", "ieeg", "raw", "X", "x"]
@@ -185,7 +355,8 @@ class MNEService:
         self.loaded_datasets = {}  # Cache for loaded datasets
         self.dataset_file_paths = {}  # Track original file paths for persistence
     
-    def load_file(self, file_path: str) -> Tuple[mne.io.Raw, str]:
+    def load_file(self, file_path: str, start_sec: float = 0,
+                  duration_sec: Optional[float] = None) -> Tuple[mne.io.Raw, str]:
         """Load a neurophysiological data file"""
         file_ext = Path(file_path).suffix.lower()
         
@@ -193,6 +364,22 @@ class MNEService:
         if file_ext == '.mat':
             raw = _load_mat_as_raw(file_path)
             dataset_id = Path(file_path).stem
+            self.loaded_datasets[dataset_id] = raw
+            self.dataset_file_paths[dataset_id] = file_path
+            return raw, dataset_id
+
+        # .h5 files — SWEZ-ETHZ iEEG format
+        if file_ext == '.h5':
+            raw = _load_h5_as_raw(file_path, start_sec=start_sec,
+                                  duration_sec=duration_sec)
+            stem = Path(file_path).stem
+            # Make dataset_id unique for segments
+            if start_sec > 0 or duration_sec is not None:
+                dataset_id = f"{stem}_s{int(start_sec)}"
+                if duration_sec is not None:
+                    dataset_id += f"_d{int(duration_sec)}"
+            else:
+                dataset_id = stem
             self.loaded_datasets[dataset_id] = raw
             self.dataset_file_paths[dataset_id] = file_path
             return raw, dataset_id
