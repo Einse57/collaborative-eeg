@@ -32,6 +32,7 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
   // H5 browser state
   const [h5BrowseOpen, setH5BrowseOpen] = useState(false)
   const [h5Path, setH5Path] = useState('')
+  const [h5PathInput, setH5PathInput] = useState('')  // editable path bar
   const [h5Entries, setH5Entries] = useState([])
   const [h5Browsing, setH5Browsing] = useState(false)
   const [h5Inspecting, setH5Inspecting] = useState(null)  // inspection result
@@ -39,6 +40,7 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
   const [h5SegStart, setH5SegStart] = useState(0)
   const [h5SegDuration, setH5SegDuration] = useState('')  // '' = full file
   const [h5PathHistory, setH5PathHistory] = useState([])
+  const [h5Roots, setH5Roots] = useState([])  // allowed browse roots
 
   // Load available detection plugins on mount.
   // Backend loads plugins in background — poll until ready.
@@ -202,6 +204,13 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
   }
 
   // ── H5 browser handlers ──────────────────────────────────────────────
+  const fetchH5Roots = async () => {
+    try {
+      const resp = await axios.get(`${API_URL}/api/datasets/h5/roots`)
+      setH5Roots(resp.data.roots)
+    } catch (_) { /* ignore */ }
+  }
+
   const browseH5 = async (dir) => {
     setH5Browsing(true)
     try {
@@ -209,6 +218,7 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
       const resp = await axios.get(`${API_URL}/api/datasets/h5/browse`, { params })
       setH5Entries(resp.data.entries)
       setH5Path(resp.data.path)
+      setH5PathInput(resp.data.path)
       setH5Inspecting(null)
     } catch (error) {
       alert('Error browsing H5 directory: ' + (error.response?.data?.detail || error.message))
@@ -220,8 +230,43 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
   const openH5Browser = () => {
     setH5BrowseOpen(true)
     setH5PathHistory([])
-    // Browse with no path — server returns its default root
+    fetchH5Roots()
     browseH5(h5Path || '')
+  }
+
+  const handlePathInputGo = async () => {
+    const target = h5PathInput.trim()
+    if (!target) return
+    // Try browsing directly; if 403 (not an allowed root), register it first
+    setH5Browsing(true)
+    try {
+      const resp = await axios.get(`${API_URL}/api/datasets/h5/browse`, { params: { path: target } })
+      setH5PathHistory(prev => [...prev, h5Path])
+      setH5Entries(resp.data.entries)
+      setH5Path(resp.data.path)
+      setH5PathInput(resp.data.path)
+      setH5Inspecting(null)
+    } catch (error) {
+      if (error.response?.status === 403) {
+        // Auto-register as a new root and retry
+        try {
+          await axios.post(`${API_URL}/api/datasets/h5/roots`, { path: target })
+          fetchH5Roots()
+          const resp = await axios.get(`${API_URL}/api/datasets/h5/browse`, { params: { path: target } })
+          setH5PathHistory(prev => [...prev, h5Path])
+          setH5Entries(resp.data.entries)
+          setH5Path(resp.data.path)
+          setH5PathInput(resp.data.path)
+          setH5Inspecting(null)
+        } catch (e2) {
+          alert('Could not access path: ' + (e2.response?.data?.detail || e2.message))
+        }
+      } else {
+        alert('Error: ' + (error.response?.data?.detail || error.message))
+      }
+    } finally {
+      setH5Browsing(false)
+    }
   }
 
   const navigateH5 = (dir) => {
@@ -260,14 +305,6 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
     }
     if (h5SegDuration !== '' && h5SegDuration > 0) {
       body.duration_sec = parseFloat(h5SegDuration)
-    }
-
-    // Warn if loading >2 GB into memory
-    const estMem = h5Inspecting.estimated_memory_gb
-    if (!body.duration_sec && estMem > 2) {
-      if (!confirm(
-        `This will load ~${estMem.toFixed(1)} GB into memory (${h5Inspecting.n_channels} ch × ${h5Inspecting.duration_hours.toFixed(1)} hours).\n\nContinue, or cancel and set a segment duration?`
-      )) return
     }
 
     setH5Loading(true)
@@ -317,12 +354,35 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
               <button className="h5-close-btn" onClick={() => setH5BrowseOpen(false)}>✕</button>
             </div>
 
-            {/* Breadcrumb / path */}
+            {/* Quick-access roots */}
+            {h5Roots.length > 0 && (
+              <div className="h5-roots-bar">
+                {h5Roots.filter(r => r.exists).map(r => (
+                  <button
+                    key={r.path}
+                    className={`h5-root-btn ${h5Path === r.path ? 'active' : ''}`}
+                    onClick={() => { setH5PathHistory(prev => [...prev, h5Path]); browseH5(r.path) }}
+                    title={r.path}
+                  >
+                    📁 {r.path.split(/[\\/]/).filter(Boolean).pop()}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Editable path bar */}
             <div className="h5-path-bar">
               {h5PathHistory.length > 0 && (
-                <button className="h5-nav-btn" onClick={navigateH5Up}>⬆ Back</button>
+                <button className="h5-nav-btn" onClick={navigateH5Up}>⬆</button>
               )}
-              <span className="h5-path-text" title={h5Path}>{h5Path}</span>
+              <input
+                className="h5-path-input"
+                value={h5PathInput}
+                onChange={e => setH5PathInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handlePathInputGo()}
+                placeholder="Type or paste a path…"
+              />
+              <button className="h5-nav-btn" onClick={handlePathInputGo}>Go</button>
             </div>
 
             {/* File list */}
@@ -361,9 +421,9 @@ function DatasetManager({ datasets, selectedDataset, onDatasetSelect, onUploadSu
                   <span>Sample Rate:</span><span>{h5Inspecting.fs} Hz</span>
                   <span>File Size:</span><span>{h5Inspecting.size_gb.toFixed(2)} GB</span>
                   <span>Seizures:</span><span>{h5Inspecting.n_seizures}</span>
-                  <span>Est. Memory:</span>
-                  <span style={{color: h5Inspecting.estimated_memory_gb > 2 ? '#f44336' : '#4caf50', fontWeight: 600}}>
-                    {h5Inspecting.estimated_memory_gb.toFixed(2)} GB
+                  <span>Raw Size:</span>
+                  <span style={{color: '#888'}}>
+                    {h5Inspecting.estimated_memory_gb.toFixed(2)} GB (lazy — not loaded into memory)
                   </span>
                   {h5Inspecting.is_vds_broken && (
                     <>

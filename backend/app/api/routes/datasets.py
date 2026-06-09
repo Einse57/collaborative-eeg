@@ -10,6 +10,7 @@ from pathlib import Path
 import os
 
 from app.services.mne_service import mne_service, _scan_h5_info
+from app.services.h5_dataset_ref import H5DatasetRef
 from app.core.config import settings
 
 router = APIRouter()
@@ -19,6 +20,9 @@ Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
 # In-memory storage for datasets (for MVP, will use database later)
 datasets_db = {}
+
+# H5DatasetRef instances keyed by dataset_id (lazy, zero-memory references)
+h5_refs: dict[str, H5DatasetRef] = {}
 
 @router.post("/upload")
 async def upload_dataset(file: UploadFile = File(...)):
@@ -91,9 +95,9 @@ async def get_dataset(dataset_id: str):
     
     dataset = datasets_db[dataset_id]
     
-    # Ensure the dataset is loaded in mne_service
+    # Ensure the dataset is loaded in mne_service (skip for H5 refs — they're lazy)
     # If it's not loaded (e.g., after server restart), reload it
-    if dataset_id not in mne_service.loaded_datasets:
+    if dataset_id not in h5_refs and dataset_id not in mne_service.loaded_datasets:
         try:
             print(f"Dataset {dataset_id} not in memory, reloading from {dataset['file_path']}")
             raw, _ = mne_service.load_file(dataset['file_path'])
@@ -132,7 +136,33 @@ async def get_dataset_data(
         channel_list = None
         if channels:
             channel_list = [int(ch.strip()) for ch in channels.split(',')]
-        
+
+        # Use H5DatasetRef for lazy H5 datasets (no MNE, no memory)
+        if dataset_id in h5_refs:
+            ref = h5_refs[dataset_id]
+            data_arr, times_arr = ref.read_chunk(
+                start_sec=start_time,
+                duration_sec=duration,
+                channels=channel_list,
+            )
+            if channel_list is None:
+                channel_indices = list(range(ref.n_channels))
+            else:
+                channel_indices = channel_list
+
+            # Downsample
+            if downsample > 1:
+                data_arr = data_arr[:, ::downsample]
+                times_arr = times_arr[::downsample]
+
+            return {
+                "data": data_arr.tolist(),
+                "times": times_arr.tolist(),
+                "channel_indices": channel_indices,
+                "channel_names": [ref.ch_names[i] for i in channel_indices],
+                "sampling_rate": ref.fs / downsample,
+            }
+
         data = mne_service.get_data_chunk(
             dataset_id=dataset_id,
             start_time=start_time,
@@ -337,12 +367,18 @@ async def delete_dataset(dataset_id: str):
 # ── H5 local file browser endpoints ──────────────────────────────────────
 
 # Allowed root directories for browsing (prevents arbitrary filesystem access)
-# Configured via H5_BROWSE_ROOTS env var (comma-separated paths)
-_H5_ALLOWED_ROOTS = [Path(settings.UPLOAD_DIR).resolve()]
+# Configured via H5_BROWSE_ROOTS env var (comma-separated paths).
+# Additional roots can be registered at runtime via POST /h5/roots.
+_h5_config_roots: list[Path] = [Path(settings.UPLOAD_DIR).resolve()]
 if settings.H5_BROWSE_ROOTS:
-    _H5_ALLOWED_ROOTS.extend(
+    _h5_config_roots.extend(
         Path(p.strip()).resolve() for p in settings.H5_BROWSE_ROOTS.split(",") if p.strip()
     )
+_h5_session_roots: list[Path] = []   # added at runtime via the API
+
+
+def _all_h5_roots() -> list[Path]:
+    return _h5_config_roots + _h5_session_roots
 
 
 def _is_path_allowed(p: Path) -> bool:
@@ -350,8 +386,35 @@ def _is_path_allowed(p: Path) -> bool:
     resolved = p.resolve()
     return any(
         resolved == root or root in resolved.parents
-        for root in _H5_ALLOWED_ROOTS
+        for root in _all_h5_roots()
     )
+
+
+@router.get("/h5/roots")
+async def list_h5_roots():
+    """Return the list of allowed H5 browse roots."""
+    roots = []
+    for r in _all_h5_roots():
+        exists = r.exists()
+        roots.append({"path": str(r), "exists": exists})
+    return {"roots": roots}
+
+
+class H5AddRootRequest(BaseModel):
+    path: str
+
+
+@router.post("/h5/roots")
+async def add_h5_root(req: H5AddRootRequest):
+    """Register a new browse root for this server session."""
+    p = Path(req.path).resolve()
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found: {req.path}")
+    if not p.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+    if p not in _all_h5_roots():
+        _h5_session_roots.append(p)
+    return {"path": str(p), "roots": [str(r) for r in _all_h5_roots()]}
 
 
 @router.get("/h5/browse")
@@ -365,10 +428,10 @@ async def browse_h5_directory(
     """
     if path is None:
         # Default to first allowed root
-        path = str(_H5_ALLOWED_ROOTS[0])
+        path = str(_all_h5_roots()[0])
     p = Path(path)
     if not _is_path_allowed(p):
-        raise HTTPException(status_code=403, detail="Path outside allowed directories")
+        raise HTTPException(status_code=403, detail=f"Path outside allowed directories. Add it first via the \"Add Root\" button.")
     if not p.exists():
         raise HTTPException(status_code=404, detail=f"Path not found: {path}")
     if not p.is_dir():
@@ -436,11 +499,16 @@ class H5LoadRequest(BaseModel):
     path: str
     start_sec: float = 0
     duration_sec: Optional[float] = None
+    lazy: bool = True  # True = H5DatasetRef (no memory), False = load into MNE
 
 
 @router.post("/h5/load")
 async def load_h5_file(req: H5LoadRequest):
     """Load an H5 file (or segment) into the annotation platform.
+
+    With lazy=True (default), registers a zero-memory H5DatasetRef that
+    serves data on demand via h5py random-access reads.
+    With lazy=False, loads the segment fully into an MNE RawArray.
 
     Returns dataset_id, metadata, and annotations — same shape as upload.
     """
@@ -451,30 +519,88 @@ async def load_h5_file(req: H5LoadRequest):
         raise HTTPException(status_code=404, detail=f"File not found: {req.path}")
 
     try:
-        raw, dataset_id = mne_service.load_file(
-            str(p), start_sec=req.start_sec, duration_sec=req.duration_sec,
-        )
-        metadata = mne_service.get_metadata(raw)
-        annotations = mne_service.load_annotations(raw)
+        if req.lazy and req.duration_sec is None and req.start_sec == 0:
+            # Lazy mode — register H5DatasetRef, no signal in memory
+            info = _scan_h5_info(str(p))
+            info["path"] = str(p)
+            ref = H5DatasetRef.from_scan(info)
+            patient_id = p.stem.replace("_total", "").split("_part_")[0]
+            dataset_id = f"h5_{patient_id}"
+            h5_refs[dataset_id] = ref
 
-        # Register in datasets_db so other endpoints work
-        datasets_db[dataset_id] = {
-            "id": dataset_id,
-            "filename": p.name,
-            "file_path": str(p),
-            "metadata": metadata,
-            "annotations": annotations,
-            "uploaded_at": None,
-        }
+            metadata = ref.get_metadata()
+            annotations = ref.get_annotations()
 
-        return {
-            "dataset_id": dataset_id,
-            "filename": p.name,
-            "metadata": metadata,
-            "annotations": annotations,
-        }
+            datasets_db[dataset_id] = {
+                "id": dataset_id,
+                "filename": p.name,
+                "file_path": str(p),
+                "metadata": metadata,
+                "annotations": annotations,
+                "uploaded_at": None,
+            }
+
+            return {
+                "dataset_id": dataset_id,
+                "filename": p.name,
+                "metadata": metadata,
+                "annotations": annotations,
+            }
+        else:
+            # Eager mode — load segment into MNE RawArray
+            raw, dataset_id = mne_service.load_file(
+                str(p), start_sec=req.start_sec, duration_sec=req.duration_sec,
+            )
+            metadata = mne_service.get_metadata(raw)
+            annotations = mne_service.load_annotations(raw)
+
+            datasets_db[dataset_id] = {
+                "id": dataset_id,
+                "filename": p.name,
+                "file_path": str(p),
+                "metadata": metadata,
+                "annotations": annotations,
+                "uploaded_at": None,
+            }
+
+            return {
+                "dataset_id": dataset_id,
+                "filename": p.name,
+                "metadata": metadata,
+                "annotations": annotations,
+            }
     except Exception as e:
         import traceback
         print(f"Error loading H5: {e}")
         print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{dataset_id}/envelope")
+async def get_dataset_envelope(
+    dataset_id: str,
+    points: int = Query(2000, description="Number of envelope points"),
+):
+    """Get a downsampled min/max envelope of the full recording.
+
+    Only available for H5DatasetRef datasets (lazy mode).
+    Returns arrays suitable for drawing a full-timeline overview bar.
+    """
+    if dataset_id not in h5_refs:
+        raise HTTPException(
+            status_code=400,
+            detail="Envelope only available for lazy-loaded H5 datasets",
+        )
+    ref = h5_refs[dataset_id]
+    try:
+        env = ref.get_envelope(target_points=points)
+        return {
+            "times": env["times"].tolist(),
+            "env_min": env["env_min"].tolist(),
+            "env_max": env["env_max"].tolist(),
+            "n_channels": env["n_channels"],
+            "duration": ref.duration_seconds,
+            "seizures": ref.seizures,
+        }
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -2,6 +2,10 @@
   position: relative;
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .viewer-toolbar {
   display: flex;
   justify-content: space-between;

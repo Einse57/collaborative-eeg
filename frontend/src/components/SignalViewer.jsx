@@ -19,13 +19,13 @@ const getApiUrl = () => {
 
 const API_URL = getApiUrl();
 
-function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotationCreate, onAnnotationsRefresh, socket, currentUser }) {
+function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotationCreate, onAnnotationsRefresh, socket, currentUser, externalViewportStart, onViewportChange }) {
   console.log('SignalViewer component rendered with dataset:', dataset?.id)
   
   const canvasRef = useRef(null)
   const containerRef = useRef(null)
   const [signalData, setSignalData] = useState(null)
-  const [viewportStart, setViewportStart] = useState(0)
+  const [viewportStart, setViewportStartInternal] = useState(0)
   const [viewportDuration, setViewportDuration] = useState(5)  // Default to 5 seconds
   const [amplitudeScale, setAmplitudeScale] = useState(1.0)  // 1.0 = normal, >1 = bigger, <1 = smaller
   const [loading, setLoading] = useState(false)
@@ -42,6 +42,19 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
   const rafIdRef = useRef(null)
   const lastViewportStartRef = useRef(viewportStart)
 
+  // Wrap setViewportStart to also report changes to parent (for TimelineBar sync)
+  const setViewportStart = useCallback((val) => {
+    setViewportStartInternal(val)
+    onViewportChange?.(val, viewportDuration)
+  }, [onViewportChange, viewportDuration])
+
+  // Respond to external viewport jump (from TimelineBar click)
+  useEffect(() => {
+    if (externalViewportStart != null && isFinite(externalViewportStart)) {
+      setViewportStartInternal(externalViewportStart)
+    }
+  }, [externalViewportStart])
+
   // Load signal data when viewport changes
   useEffect(() => {
     if (!dataset) {
@@ -53,7 +66,7 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataset, viewportStart, viewportDuration])
 
-  // Render canvas when data or annotations change
+  // Render canvas when data, viewport, or annotations change
   useEffect(() => {
     if (signalData) {
       console.log('Signal data or annotations changed, rendering canvas')
@@ -61,7 +74,7 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
       renderCanvas()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signalData, annotations, amplitudeScale, selectedDescription, maxChannelsToShow])
+  }, [signalData, viewportStart, viewportDuration, annotations, amplitudeScale, selectedDescription, maxChannelsToShow])
 
   const loadSignalData = async () => {
     setLoading(true)
@@ -785,7 +798,23 @@ function SignalViewer({ dataset, annotations, customAnnotationTypes, onAnnotatio
         )
       })()}
 
-      <div className="canvas-container" style={{ maxHeight: '600px', overflowY: 'auto', overflowX: 'hidden' }}>
+      <div className="canvas-container" style={{ maxHeight: '600px', overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}>
+        {loading && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(255,255,255,0.8)', zIndex: 10,
+            fontSize: '14px', color: '#555', gap: '8px',
+          }}>
+            <span className="spinner" style={{
+              width: 18, height: 18, border: '2px solid #ccc',
+              borderTopColor: '#2196F3', borderRadius: '50%',
+              display: 'inline-block',
+              animation: 'spin .8s linear infinite',
+            }} />
+            Loading signal data…
+          </div>
+        )}
         <canvas
           ref={canvasRef}
           width={1200}

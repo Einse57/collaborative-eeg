@@ -3,6 +3,7 @@ import axios from 'axios'
 import io from 'socket.io-client'
 import DatasetManager from './components/DatasetManager'
 import SignalViewer from './components/SignalViewer'
+import TimelineBar from './components/TimelineBar'
 import AnnotationPanel from './components/AnnotationPanel'
 import './App.css'
 
@@ -40,6 +41,11 @@ function App() {
   const [customAnnotationTypes, setCustomAnnotationTypes] = useState([])  // Shared custom types
   const [currentUser, setCurrentUser] = useState(null)  // Current user name
   const selectedDatasetIdRef = useRef(null)  // Track selected dataset ID for socket events
+
+  // Timeline ↔ SignalViewer sync
+  const [timelineViewportStart, setTimelineViewportStart] = useState(null)
+  const [currentViewportStart, setCurrentViewportStart] = useState(0)
+  const [currentViewportDuration, setCurrentViewportDuration] = useState(5)
   
   // Prompt for username on mount
   useEffect(() => {
@@ -249,6 +255,13 @@ function App() {
               <div style={{padding: '10px', background: '#f0f0f0', marginBottom: '10px'}}>
                 DEBUG: Dataset selected - {selectedDataset.id} - {selectedDataset.filename}
               </div>
+              <TimelineBar
+                dataset={selectedDataset}
+                viewportStart={currentViewportStart}
+                viewportDuration={currentViewportDuration}
+                onViewportChange={(start) => setTimelineViewportStart(start)}
+                annotations={annotations}
+              />
               <SignalViewer
                 dataset={selectedDataset}
                 annotations={annotations}
@@ -257,6 +270,11 @@ function App() {
                 onAnnotationsRefresh={() => loadAnnotations(selectedDataset.id)}
                 socket={socket}
                 currentUser={currentUser}
+                externalViewportStart={timelineViewportStart}
+                onViewportChange={(start, dur) => {
+                  setCurrentViewportStart(start)
+                  setCurrentViewportDuration(dur)
+                }}
               />
               <AnnotationPanel
                 datasetId={selectedDataset.id}

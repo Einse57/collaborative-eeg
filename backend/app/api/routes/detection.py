@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ...services.mne_service import mne_service
-from ..routes.datasets import datasets_db
+from ..routes.datasets import datasets_db, h5_refs
 from plugins import plugin_registry
 from plugins.loader import load_plugins_background
 
@@ -205,8 +205,9 @@ async def detect_events(dataset_id: str, request: DetectionRequest, http_request
     Start a detection job.  Returns immediately with a job_id that the
     frontend can poll via GET /detection/jobs/{job_id}.
     """
-    # Validate dataset — auto-reload if evicted from memory
-    if dataset_id not in mne_service.loaded_datasets:
+    # Validate dataset — check H5 ref first, then MNE
+    h5_ref = h5_refs.get(dataset_id)
+    if h5_ref is None and dataset_id not in mne_service.loaded_datasets:
         ds_info = datasets_db.get(dataset_id)
         if ds_info and ds_info.get("file_path"):
             try:
@@ -234,7 +235,11 @@ async def detect_events(dataset_id: str, request: DetectionRequest, http_request
                    f"missing: {', '.join(plugin.requires_dependencies)}",
         )
 
-    raw = mne_service.loaded_datasets[dataset_id]
+    # Pass H5 ref if available, otherwise MNE Raw
+    if h5_ref is not None:
+        raw = h5_ref  # Plugin must handle H5DatasetRef
+    else:
+        raw = mne_service.loaded_datasets[dataset_id]
 
     kwargs: Dict[str, Any] = {
         "segment_duration": request.segment_duration,
