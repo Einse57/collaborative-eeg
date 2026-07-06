@@ -8,7 +8,7 @@ This platform provides a web interface for annotating EEG/MEG recordings with re
 
 ### Key Features
 
-- Load and visualize neurophysiological data (.fif, .edf, .bdf, .set, .vhdr, .mat)
+- Load and visualize neurophysiological data (.fif, .edf, .bdf, .set, .vhdr, .mat, .h5)
 - Interactive canvas-based signal viewer with time/amplitude controls
 - Drag-to-create annotations with live preview
 - Custom annotation type definitions
@@ -16,6 +16,7 @@ This platform provides a web interface for annotating EEG/MEG recordings with re
 - Automatic persistence to original .fif files
 - Real-time multi-user collaboration via WebSocket
 - MNE-Python compatible data handling
+- Server-side H5 file browser with metadata inspection and segment loading
 
 
 ### Datasets
@@ -27,8 +28,11 @@ This platform provides a web interface for annotating EEG/MEG recordings with re
 - `.set` - EEGLAB format
 - `.vhdr` - BrainVision format
 - `.mat` - MATLAB files containing iEEG/EEG data (e.g. SWEC-ETHZ dataset)
+- `.h5` - HDF5 files with iEEG data (e.g. SWEZ-ETHZ dataset; supports Blosc-compressed files via `hdf5plugin`)
 
-**Important:** Not all `.fif` files contain raw data. Files like:
+**Note on `.fif` files:** Not all `.fif` files contain raw data. Covariance matrices, forward solutions, and other derived files will not load.
+
+**Note on `.h5` files:** H5 files can be browsed directly from the server filesystem via the built-in file browser. Files using Blosc compression (e.g. SWEZ-ETHZ dataset) require `hdf5plugin` to be installed. You can load specific time segments without reading the entire file into memory.
 
 **Using MNE sample data:** If you have MNE sample data installed, use files like:
 - `sample_audvis_raw.fif` ✅

@@ -267,6 +267,34 @@
   color: #333;
 }
 
+.h5-roots-bar {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.5rem 1.25rem 0;
+  flex-wrap: wrap;
+}
+
+.h5-root-btn {
+  background: #e8f5e9;
+  border: 1px solid #c8e6c9;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.h5-root-btn:hover {
+  background: #c8e6c9;
+}
+
+.h5-root-btn.active {
+  background: #a5d6a7;
+  border-color: #66bb6a;
+  font-weight: 600;
+}
+
 .h5-path-bar {
   display: flex;
   align-items: center;
@@ -275,6 +303,15 @@
   background: #fafafa;
   border-bottom: 1px solid #eee;
   font-size: 0.8rem;
+}
+
+.h5-path-input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-family: inherit;
 }
 
 .h5-nav-btn {
@@ -289,15 +326,6 @@
 
 .h5-nav-btn:hover {
   background: #bdbdbd;
-}
-
-.h5-path-text {
-  color: #666;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
 }
 
 .h5-file-list {
